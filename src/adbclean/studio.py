@@ -355,7 +355,7 @@ def _history_skip_reason(entry: Optional[Dict], recompress: bool, preset) -> str
     if not entry:
         return ""
     old_crf = entry.get("crf_used")
-    old_label = f"CRF{old_crf}" if old_crf is not None else "无损重封装"
+    old_label = f"CRF{old_crf}" if old_crf is not None else "档位未知"
     if preset.mode == "copy":
         return f"已压缩过（{old_label}）；无损重封装不会进一步减小体积"
     if not recompress:
