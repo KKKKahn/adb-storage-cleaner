@@ -4,16 +4,16 @@
 
 | 设备 | 系统 | 结果 |
 |---|---|---|
-| vivo 真机 (TESTDEVICE) | Android 16 / OriginOS 6 | 扫描、报告、junk dry-run、dupes、live、apps、studio 压缩/替换/恢复均正常 |
+| vivo 真机（匿名） | Android 16 / OriginOS 6 | 扫描、报告、junk dry-run、dupes、live、apps、studio 压缩/替换/恢复均正常 |
 
 ### 实况照片压缩验证
 
-- 横向样本（样本 A）：CRF20 后 3,425,268 → 1,458,780 B，SSIM 0.9920，相册动态正常。
-- 竖向样本（样本 B，存储 1920×1080 + -90° 旋转）：4,645,300 → 2,068,829 B，SSIM 0.9888，相册动态正常。
+- 横向样本：CRF20 后节省 57.4%，SSIM 0.9920，相册动态正常。
+- 竖向样本（存储 1920×1080 + -90° 旋转）：节省 55.5%，SSIM 0.9888，相册动态正常。
 - 输出追加 `vivoMediaExtInfo` uuid box 后，真机替换、媒体扫描、JPG 未改动均验证通过。
 - 实测 uuid box 大小有 359 B 和 493 B 两种，代码按原字节复制，不做假设。
 - ffmpeg 7.1.1 / ffprobe 7.1.1 验证通过；更低版本未测试。
-- macOS VideoToolbox 硬件编码已在 vivo 真机 样本上真机验证：动态效果和颜色正常；输出 `color_space` 标记为 smpte170m（与 bt470bg 同为 601 矩阵），实际观看无异常。
+- macOS VideoToolbox 硬件编码已在 vivo 真机样本上验证：动态效果和颜色正常；输出 `color_space` 标记为 smpte170m（与 bt470bg 同为 601 矩阵），实际观看无异常。
 - 4:3（1728×1296@30fps）已批量回归 19/19 成功；level 按宏块/帧率计算，不缩放、不改变宽高比。奇数宽高只裁掉最多 1 像素。
 - 高码率短视频的硬件 q60 可能只省 2–6%；0.2.3 起自动回退软件 CRF20/23，实测可提升到 35–50%（个别源文件本身很紧凑时仍可能只有约 8%）。
 - 硬件编码仅 macOS 可用；Windows/Linux 默认回退到 libx264 veryfast。

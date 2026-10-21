@@ -223,7 +223,6 @@ def is_auto_deletable_app_file(path: str) -> bool:
 SECONDARY_MARKERS = (
     "互传",
     "办公套件",
-    "chat",
     "backup",
     "备份",
     "副本",

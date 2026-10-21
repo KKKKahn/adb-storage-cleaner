@@ -54,7 +54,7 @@ def make_pairs():
 
 def make_state(pairs=None):
     pairs = pairs if pairs is not None else make_pairs()
-    scan = Scan(serial="SERIAL", root="/sdcard", scanned_at="2026-10-21T13:38:53+08:00")
+    scan = Scan(serial="SERIAL", root="/sdcard", scanned_at="2026-01-03T13:38:53+08:00")
     return StudioState(
         adb=ADB(adb_path="adb", serial="SERIAL"),
         scan=scan,
@@ -79,11 +79,11 @@ def test_album_of():
 def test_state_grouping_dates_months_albums():
     state = make_state()
     dates = state.dates()
-    assert [row["date"] for row in dates] == ["2026-01-02", "2026-01-04", "2026-01-05"]
-    assert dates[0]["count"] == 2
-    assert dates[0]["bytes"] == 300
+    assert [row["date"] for row in dates] == ["2026-01-05", "2026-01-04", "2026-01-02"]
+    assert dates[0]["count"] == 1
+    assert dates[0]["bytes"] == 400
     months = state.months()
-    assert months[0] == {"month": "2026-01", "count": 3, "bytes": 600}
+    assert months[0] == {"month": "2026-01", "count": 4, "bytes": 1000}
     albums = state.albums()
     assert albums[0]["album"] == "/sdcard/DCIM/Camera"
     assert albums[0]["name"] == "Camera"
@@ -95,7 +95,7 @@ def test_state_grouping_dates_months_albums():
 def test_pairs_for_filters():
     state = make_state()
     assert len(state.pairs_for("2026-01-02")) == 2
-    assert len(state.pairs_for_month("2026-01")) == 3
+    assert len(state.pairs_for_month("2026-01")) == 4
     assert len(state.pairs_for_album("/sdcard/DCIM/Camera")) == 3
     assert state.pairs_for_album("/sdcard/Nope") == []
 
@@ -238,12 +238,12 @@ def test_api_requires_token(studio_server):
 def test_api_dates_and_filters(studio_server):
     status, data = studio_server.json("GET", "/api/dates?token=test-token")
     assert status == 200
-    assert data["dates"][0]["date"] == "2026-01-02"
+    assert data["dates"][0]["date"] == "2026-01-05"
     assert data["months"][0]["month"] == "2026-01"
     assert data["albums"][0]["name"] == "Camera"
 
     status, data = studio_server.json(
-        "GET", "/api/photos?date=2026-10-20&token=test-token"
+        "GET", "/api/photos?date=2026-01-02&token=test-token"
     )
     assert status == 200
     assert len(data["photos"]) == 2
@@ -388,7 +388,7 @@ def test_read_backup_session(tmp_path):
     assert info["bytes"] == 8_497_773
     entry = info["entries"][0]
     assert entry["date"] == "2026-01-03"
-    assert entry["time"] == "11:05:05"
+    assert entry["time"] == "04:05:06"
     assert entry["backup"] == (
         "20260103-040506/sdcard/DCIM/Camera/IMG_20260103_040506.mp4"
     )
