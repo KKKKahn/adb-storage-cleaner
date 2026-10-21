@@ -1,6 +1,6 @@
 'use strict';
 
-const TOKEN = document.querySelector('meta[name="adbclean-token"]').content;
+const TOKEN = document.querySelector('meta[name="klean-token"]').content;
 const PAGE_SIZE = 200;
 const BATCH_SUGGESTION = 200;
 const EST_RATIO = {
@@ -102,7 +102,7 @@ function phoneVideoUrl(photo) {
 async function api(path, options) {
   const opts = options || {};
   const headers = Object.assign({}, opts.headers || {});
-  headers['X-Adbclean-Token'] = TOKEN;
+  headers['X-Klean-Token'] = TOKEN;
   if (opts.body) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {
     method: opts.method || 'GET',

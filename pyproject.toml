@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adb-storage-cleaner"
-version = "0.2.6"
+name = "klean"
+version = "0.3.0"
 description = "不 Root、纯 ADB 的安卓存储审计与安全清理工具（默认只读，白名单删除）"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -40,18 +40,18 @@ dependencies = []
 dev = ["pytest>=7.4", "ruff>=0.6"]
 
 [project.scripts]
-adbclean = "adbclean.cli:main"
+klean = "klean.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/KKKKahn/adb-storage-cleaner"
-Issues = "https://github.com/KKKKahn/adb-storage-cleaner/issues"
-Changelog = "https://github.com/KKKKahn/adb-storage-cleaner/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/KKKKahn/klean"
+Issues = "https://github.com/KKKKahn/klean/issues"
+Changelog = "https://github.com/KKKKahn/klean/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-adbclean = ["web/*"]
+klean = ["web/*"]
 
 [tool.ruff]
 line-length = 100

@@ -1,5 +1,5 @@
-import adbclean.scan as scan_module
-from adbclean.scan import Entry, load_latest, parse_du, save_scan
+import klean.scan as scan_module
+from klean.scan import Entry, load_latest, parse_du, save_scan
 
 DU_TEXT = (
     "4096\t/sdcard/\n"

@@ -4,8 +4,8 @@ import subprocess
 
 import pytest
 
-import adbclean.compress as compress_module
-from adbclean.compress import (
+import klean.compress as compress_module
+from klean.compress import (
     PRESETS,
     CompressError,
     HdrUnsupported,

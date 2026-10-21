@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_MIGRATED_BASES: set = set()
 
 
 class SafetyError(RuntimeError):
@@ -174,6 +176,30 @@ def stamp() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _migrate_legacy_dir(base: Path) -> None:
+    """Move a pre-rename adbclean directory to the Klean path once."""
+    if str(base) in _MIGRATED_BASES:
+        return
+    _MIGRATED_BASES.add(str(base))
+    legacy = base / "adbclean"
+    target = base / "klean"
+    if not legacy.exists():
+        return
+
+    def merge(source: Path, destination: Path) -> None:
+        if not destination.exists():
+            with contextlib.suppress(OSError):
+                source.rename(destination)
+            return
+        if source.is_dir() and destination.is_dir():
+            for child in list(source.iterdir()):
+                merge(child, destination / child.name)
+            with contextlib.suppress(OSError):
+                source.rmdir()
+
+    merge(legacy, target)
+
+
 def state_dir() -> Path:
     """Per-user cache/state directory; created on demand."""
     if os.name == "nt":
@@ -182,7 +208,8 @@ def state_dir() -> Path:
         base = Path.home() / "Library" / "Caches"
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
-    path = base / "adbclean"
+    _migrate_legacy_dir(base)
+    path = base / "klean"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -195,7 +222,8 @@ def data_dir() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
-    path = base / "adbclean"
+    _migrate_legacy_dir(base)
+    path = base / "klean"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

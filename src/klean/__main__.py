@@ -1,4 +1,4 @@
-"""Allow `python -m adbclean`."""
+"""Allow `python -m klean`."""
 
 import sys
 

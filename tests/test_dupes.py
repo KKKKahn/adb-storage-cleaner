@@ -1,9 +1,9 @@
-from adbclean.dupes import (
+from klean.dupes import (
     build_groups,
     candidate_groups,
     parse_hash_line,
 )
-from adbclean.scan import Entry
+from klean.scan import Entry
 
 
 def test_candidate_groups_filters_small_and_unique():

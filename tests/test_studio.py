@@ -6,11 +6,11 @@ import urllib.parse
 
 import pytest
 
-from adbclean.adb import ADB
-from adbclean.compress import PRESETS, CompressError
-from adbclean.live import LivePair
-from adbclean.scan import Scan
-from adbclean.studio import (
+from klean.adb import ADB
+from klean.compress import PRESETS, CompressError
+from klean.live import LivePair
+from klean.scan import Scan
+from klean.studio import (
     BadRequest,
     ItemResult,
     Job,
@@ -131,7 +131,7 @@ def test_history_skip_reason():
 
 
 def test_history_roundtrip(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "HISTORY_PATH", tmp_path / "history.json")
     _save_history({"/sdcard/a.mp4": {"compressed_size": 1}})
@@ -188,7 +188,7 @@ class APIClient:
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         request_headers = dict(headers or {})
         if token:
-            request_headers["X-Adbclean-Token"] = token
+            request_headers["X-Klean-Token"] = token
         payload = None
         if body is not None:
             payload = json.dumps(body).encode("utf-8")
@@ -208,7 +208,7 @@ class APIClient:
 
 @pytest.fixture()
 def studio_server(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
     monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
@@ -403,7 +403,7 @@ def test_read_backup_session_missing_or_empty(tmp_path):
 
 
 def test_backup_sessions_sorted_desc(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
     old_md5 = "c" * 32
@@ -428,7 +428,7 @@ def test_backup_sessions_sorted_desc(tmp_path, monkeypatch):
 
 
 def test_delete_backup_session(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
     session = tmp_path / "backups" / "20260103-040506"
@@ -453,7 +453,7 @@ def test_delete_backup_session(tmp_path, monkeypatch):
 
 
 def test_delete_backup_rejects_unknown(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
     with pytest.raises(BadRequest):
@@ -461,7 +461,7 @@ def test_delete_backup_rejects_unknown(tmp_path, monkeypatch):
 
 
 def test_migrate_legacy_backups(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     legacy = tmp_path / "cache" / "studio" / "backups"
     new = tmp_path / "data" / "studio" / "backups"
@@ -521,7 +521,7 @@ def test_item_result_defaults():
 
 
 def test_compress_job_skips_preskipped_items(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
     state = make_state()
@@ -536,7 +536,7 @@ def test_compress_job_skips_preskipped_items(tmp_path, monkeypatch):
 
 
 def test_compress_job_cancelled_skips_items(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
     state = make_state()
@@ -549,7 +549,7 @@ def test_compress_job_cancelled_skips_items(tmp_path, monkeypatch):
 
 
 def test_compress_job_marks_unknown_pair_as_error(tmp_path, monkeypatch):
-    import adbclean.studio as studio
+    import klean.studio as studio
 
     monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
     state = make_state()

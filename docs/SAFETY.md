@@ -1,6 +1,6 @@
 # 安全模型
 
-这份文档说明 `adbclean` 的边界：它保证什么、不保证什么、以及在按下 `--apply` 之前你应该检查什么。
+这份文档说明 `klean` 的边界：它保证什么、不保证什么、以及在按下 `--apply` 之前你应该检查什么。
 
 ## 设计目标
 
@@ -45,7 +45,7 @@
 - 允许：`cache`、`caches`、`image_cache_new`、`thumbnails`、`thumbs`、`tmp`、`temp`、`logs`、`AVFSCache`
 - 拒绝：`catalogs`、`photos`、`galleryOriginal`、`files`、`databases`、包名根目录
 
-实现见 `src/adbclean/classify.py` 的 `CACHE_SEGMENT_RE` 与 `is_junk_dir()`。
+实现见 `src/klean/classify.py` 的 `CACHE_SEGMENT_RE` 与 `is_junk_dir()`。
 
 ## 去重的安全边界
 
@@ -74,7 +74,7 @@ DCIM > Pictures > Movies > Music/Documents/Recordings > Download
 
 ### 为什么哈希缓存要绑定扫描时间
 
-只按“路径 + 大小”缓存 MD5 是不安全的：应用可能原地重写一个同大小的文件。`adbclean` 把扫描时间戳作为缓存令牌，只有同一次扫描产生的哈希才会被复用。重新 `scan` 后会自动重算。
+只按“路径 + 大小”缓存 MD5 是不安全的：应用可能原地重写一个同大小的文件。`klean` 把扫描时间戳作为缓存令牌，只有同一次扫描产生的哈希才会被复用。重新 `scan` 后会自动重算。
 
 ## 动态照片的安全边界
 
@@ -97,7 +97,7 @@ DCIM > Pictures > Movies > Music/Documents/Recordings > Download
 
 ## 实况照片压缩的安全边界
 
-`adbclean studio` 是唯一会修改手机文件的子命令，边界如下：
+`klean studio` 是唯一会修改手机文件的子命令，边界如下：
 
 - **只改伴生 MP4。** JPG / JPEG 从不写入、不重命名、不删除。
 - **只处理验证过的配对。** 必须同时满足：`IMG_YYYYMMDD_HHMMSS.mp4`、同名 JPG 存在、MediaStore 时长 ≤ 5 秒。
@@ -112,11 +112,11 @@ DCIM > Pictures > Movies > Music/Documents/Recordings > Download
 
 ```text
 # macOS
-~/Library/Application Support/adbclean/studio/backups/
+~/Library/Application Support/klean/studio/backups/
 # Linux
-${XDG_DATA_HOME:-~/.local/share}/adbclean/studio/backups/
+${XDG_DATA_HOME:-~/.local/share}/klean/studio/backups/
 # Windows
-%APPDATA%\adbclean\studio\backups\
+%APPDATA%\klean\studio\backups\
 ```
 
 每个批次包含 `manifest.tsv`（原始/压缩大小、双方 MD5、mtime）和 `restore.sh`。Studio 重启后仍可从「本地备份」批量恢复。
@@ -129,11 +129,11 @@ ${XDG_DATA_HOME:-~/.local/share}/adbclean/studio/backups/
 
 ```text
 # macOS
-~/Library/Caches/adbclean/manifests/
+~/Library/Caches/klean/manifests/
 # Linux
-~/.cache/adbclean/manifests/
+~/.cache/klean/manifests/
 # Windows
-%LOCALAPPDATA%\adbclean\manifests\
+%LOCALAPPDATA%\klean\manifests\
 ```
 
 文件为 TSV，包含：
@@ -147,9 +147,9 @@ ${XDG_DATA_HOME:-~/.local/share}/adbclean/studio/backups/
 ## 执行前检查清单
 
 - [ ] `adb devices` 只有一台目标设备，状态是 `device`；
-- [ ] `adbclean info` 的型号/序列号正确；
-- [ ] `adbclean junk` 的列表里没有你认识的个人目录；
-- [ ] `adbclean dupes` 的“保留”列是你希望保留的目录；
+- [ ] `klean info` 的型号/序列号正确；
+- [ ] `klean junk` 的列表里没有你认识的个人目录；
+- [ ] `klean dupes` 的“保留”列是你希望保留的目录；
 - [ ] 动态照片已备份（如果在意动效）；
 - [ ] 手机电量充足，扫描/删除期间不要锁屏或拔线。
 

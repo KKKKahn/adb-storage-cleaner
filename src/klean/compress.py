@@ -755,7 +755,7 @@ def compress_file(
 
     directory = os.path.dirname(os.path.abspath(dst)) or "."
     os.makedirs(directory, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".adbclean-", suffix=".mp4")
+    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".klean-", suffix=".mp4")
     os.close(fd)
     best_path = temp_path + ".best.mp4"
 

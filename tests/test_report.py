@@ -1,6 +1,6 @@
 
-from adbclean.report import build, render_html, render_markdown
-from adbclean.scan import Entry, Scan
+from klean.report import build, render_html, render_markdown
+from klean.scan import Entry, Scan
 
 
 class FakeADB:

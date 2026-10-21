@@ -1,4 +1,4 @@
-from adbclean.cli import build_parser
+from klean.cli import build_parser
 
 
 def test_global_serial_before_and_after_command():

@@ -1,4 +1,4 @@
-"""Command line interface for adbclean."""
+"""Command line interface for klean."""
 
 from __future__ import annotations
 
@@ -71,11 +71,11 @@ def _common() -> argparse.ArgumentParser:
 def build_parser() -> argparse.ArgumentParser:
     common = _common()
     parser = argparse.ArgumentParser(
-        prog="adbclean",
+        prog="klean",
         description="不 Root、纯 ADB 的安卓存储审计与安全清理工具。默认只读。",
         parents=[common],
     )
-    parser.add_argument("--version", action="version", version=f"adbclean {__version__}")
+    parser.add_argument("--version", action="version", version=f"Klean {__version__}")
     sub = parser.add_subparsers(dest="command", required=True, metavar="命令")
 
     p = sub.add_parser("devices", parents=[common], help="列出已连接设备")
@@ -180,7 +180,7 @@ def _scan(args, adb: ADB) -> Scan:
     if getattr(args, "cached", False):
         scan = load_latest(adb.serial)
         if scan is None:
-            raise ADBError("没有可用的扫描缓存。请先运行：adbclean scan")
+            raise ADBError("没有可用的扫描缓存。请先运行：klean scan")
         print_info(f"使用缓存清单：{scan.scanned_at}（{format_int(scan.total_files)} 个文件）", _style(args))
         return scan
     style = _style(args)
@@ -508,7 +508,7 @@ def cmd_live(args) -> int:
     if not args.delete:
         print_info(
             "只读模式。删除伴生 MP4 会永久失去照片动效（JPG 仍保留）："
-            "adbclean live --delete --backup <目录>",
+            "klean live --delete --backup <目录>",
             style,
         )
         return 0
@@ -621,7 +621,7 @@ def cmd_all(args) -> int:
     print()
     for path in paths:
         print(style.green("✓") + " " + os.path.abspath(path))
-    print_info("全部操作均为只读；需要清理时运行 adbclean junk --apply。", style)
+    print_info("全部操作均为只读；需要清理时运行 klean junk --apply。", style)
     return 0
 
 

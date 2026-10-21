@@ -1,12 +1,12 @@
 # 贡献指南
 
-感谢你愿意改进 `adbclean`。这是一个会删除文件的工具，所以**安全审查优先于功能数量**。
+感谢你愿意改进 `klean`。这是一个会删除文件的工具，所以**安全审查优先于功能数量**。
 
 ## 开发环境
 
 ```bash
-git clone https://github.com/KKKKahn/adb-storage-cleaner.git
-cd adb-storage-cleaner
+git clone https://github.com/KKKKahn/klean.git
+cd klean
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
@@ -39,7 +39,7 @@ ruff check src tests
 
 以“某应用的缓存目录”为例：
 
-1. 在 `src/adbclean/classify.py` 中添加精确匹配规则，避免使用宽泛的子串匹配。
+1. 在 `src/klean/classify.py` 中添加精确匹配规则，避免使用宽泛的子串匹配。
 2. 在 `tests/test_classify.py` 中同时添加“应该匹配”和“不应该匹配”的用例。
 3. 在 `docs/SAFETY.md` 的白名单章节补充说明。
 4. 在 PR 描述中解释：这个目录里通常是什么、删除后应用会怎样、为什么不会影响用户数据。

@@ -1,6 +1,6 @@
 # 实况照片 MP4 压缩
 
-这份文档说明 `adbclean studio` 的压缩原理、参数、验证结果和安全边界。
+这份文档说明 `klean studio` 的压缩原理、参数、验证结果和安全边界。
 
 ## 适用对象
 
@@ -102,7 +102,7 @@ SSIM 默认关闭（额外解码两段视频），但完整的解码校验保留
 
 ## ffmpeg 参数
 
-核心命令（实际由 `src/adbclean/compress.py` 生成）：
+核心命令（实际由 `src/klean/compress.py` 生成）：
 
 ```bash
 ffmpeg -hide_banner -loglevel error -y \
@@ -187,9 +187,9 @@ level 4.0 要求 frame_mbs ≤ 8192 且 mbps ≤ 245760
 备份位置（持久化，不在 Caches 里）：
 
 ```text
-macOS:   ~/Library/Application Support/adbclean/studio/backups/
-Linux:   ${XDG_DATA_HOME:-~/.local/share}/adbclean/studio/backups/
-Windows: %APPDATA%\adbclean\studio\backups\
+macOS:   ~/Library/Application Support/klean/studio/backups/
+Linux:   ${XDG_DATA_HOME:-~/.local/share}/klean/studio/backups/
+Windows: %APPDATA%\klean\studio\backups\
 ```
 
 每个「应用」批次一个目录：
@@ -233,8 +233,8 @@ Studio 重启后任务列表会清空，但备份批次仍然可在顶部「本�
 每次成功应用后写入本机历史：
 
 ```text
-macOS:   ~/Library/Application Support/adbclean/studio/history.json
-Windows: %APPDATA%\adbclean\studio\history.json
+macOS:   ~/Library/Application Support/klean/studio/history.json
+Windows: %APPDATA%\klean\studio\history.json
 ```
 
 记录字段包括路径、原始/压缩 MD5、原始/压缩大小、实际使用的 CRF、速度、备份路径和时间。判断“已压缩”的条件是：历史存在，且手机扫描到的大小等于历史压缩后大小。
@@ -263,11 +263,11 @@ Windows: %APPDATA%\adbclean\studio\history.json
 ## 架构
 
 ```text
-src/adbclean/compress.py   # ffprobe、编码命令、SSIM、uuid 提取/追加
-src/adbclean/studio.py     # HTTP 服务、任务、缩略图、备份、应用、恢复
-src/adbclean/web/          # 原生 HTML/CSS/JS，无外部依赖
-src/adbclean/adb.py        # push / md5 / mtime / media scan
-src/adbclean/live.py       # JPG + MP4 配对
+src/klean/compress.py   # ffprobe、编码命令、SSIM、uuid 提取/追加
+src/klean/studio.py     # HTTP 服务、任务、缩略图、备份、应用、恢复
+src/klean/web/          # 原生 HTML/CSS/JS，无外部依赖
+src/klean/adb.py        # push / md5 / mtime / media scan
+src/klean/live.py       # JPG + MP4 配对
 ```
 
 本地服务只监听 `127.0.0.1`，每次启动生成随机 token；所有 `/api/*` 校验 token，POST 还校验 Host/Origin。
@@ -281,7 +281,7 @@ src/adbclean/live.py       # JPG + MP4 配对
 
 # 2. 单文件压缩（本地样本）
 PYTHONPATH=src .venv/bin/python - <<'PY'
-from adbclean.compress import PRESETS, compress_file
+from klean.compress import PRESETS, compress_file
 r = compress_file("in.mp4", "out.mp4", PRESETS["balanced"])
 print(r)
 PY
@@ -296,7 +296,7 @@ ffmpeg -v error -i out.mp4 -f null -
 
 真机验收：
 
-1. `adbclean studio`；
+1. `klean studio`；
 2. 选一张照片，CRF20，压缩；
 3. 预览压缩版；
 4. 应用，检查手机 MD5、MediaStore size/duration、mtime；

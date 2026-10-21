@@ -2,6 +2,23 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和语义化版本。
 
+## [0.3.0] - 2026-10-21
+
+### Added
+
+- macOS 应用（Apple Silicon，macOS 12+）：原生窗口 + WKWebView，双击启动，自动识别已授权的 ADB 设备后直接进入工作台。
+- 启动页提供连接/调试步骤、未授权/离线提示；插上手机后自动继续，无需手动开终端。
+- 内置 adb、ffmpeg、ffprobe 和 Python 运行时，用户无需另外安装依赖。
+- 使用中拔线会显示“手机已断开”覆盖层，重新连接并解锁后自动恢复；工作台异常可一键重启。
+- 单实例锁，避免重复启动多个后台服务。
+- 项目更名为 **Klean**；旧版缓存、扫描、历史和备份目录会在首次启动时自动迁移。
+- `prepare_studio()` 供 CLI 与 macOS 应用共用；构建脚本生成 ad-hoc 签名的 `.app` 与 DMG。
+
+### Notes
+
+- 应用为 ad-hoc 签名、未公证；首次打开需右键「打开」或在系统设置中允许。
+- 预构建包面向 Apple Silicon（M1–M6）；Intel Mac 仍可使用 CLI。
+
 ## [0.2.6] - 2026-10-21
 
 ### Added
@@ -25,7 +42,7 @@
 
 ### Added
 
-- 持久化压缩历史 `~/Library/Application Support/adbclean/studio/history.json`（Windows: `%APPDATA%\adbclean\studio\history.json`）。
+- 持久化压缩历史 `~/Library/Application Support/klean/studio/history.json`（Windows: `%APPDATA%\klean\studio\history.json`）。
 - 已应用到手机的照片会标记为「已压缩」，下次全选默认跳过；勾选「允许更深压缩」后，只有更高 CRF / 更小体积档位才会再次处理。
 - 工作台显示「已压缩」徽标和历史 CRF；恢复原图时会自动移除对应历史。
 - 取消 500 个硬限制；界面建议每批约 200 个，不再直接拒绝大批量选择。
@@ -112,7 +129,7 @@
 - 压缩引擎：视觉无损 CRF18、推荐 CRF20、小体积 CRF23、自定义 CRF、无损重封装。
 - 保留 vivo `vivoMediaExtInfo` uuid box，ffmpeg 重编码后原字节追加；JPG 从不修改。
 - 应用流程：备份原 MP4 → 推送临时文件 → 手机端 MD5 → chmod/mtime → 原子 `mv` → 媒体扫描。
-- 持久化备份目录：`~/Library/Application Support/adbclean/studio/backups/`（macOS），每批含 `manifest.tsv` 和 `restore.sh`。
+- 持久化备份目录：`~/Library/Application Support/klean/studio/backups/`（macOS），每批含 `manifest.tsv` 和 `restore.sh`。
 - 跨重启批量恢复：Studio 重启后仍可从备份列表按批次恢复；逐文件 MD5 校验，手机文件被外部修改时跳过。
 - 清除备份：应用完成后可清除本批备份，备份列表支持删除单个批次或全部；二次确认，删除不可逆。
 - 本地空间守卫：按选择体积估算所需空间，不足时拒绝开始；备份优先使用硬链接，应用成功后清理任务源文件和输出。
@@ -123,7 +140,7 @@
 
 ### Changed
 
-- 版本号升至 0.2.0；`pyproject.toml` 打包 `adbclean/web/*`。
+- 版本号升至 0.2.0；`pyproject.toml` 打包 `klean/web/*`。
 - 动态照片编号与时长过滤沿用 `live` 的规则，Studio 只展示验证过的配对。
 
 ### Known limitations

@@ -1,14 +1,14 @@
-# adbclean
+# Klean
 
 > **不 Root、纯 ADB 的安卓存储审计与安全清理工具。**
 > 先看清楚空间去哪了，再决定删什么。
 
-[![CI](https://github.com/KKKKahn/adb-storage-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/KKKKahn/adb-storage-cleaner/actions/workflows/ci.yml)
+[![CI](https://github.com/KKKKahn/klean/actions/workflows/ci.yml/badge.svg)](https://github.com/KKKKahn/klean/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
 
-`adbclean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
+`klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
 - 不需要 Root，不刷机，不修改系统分区，不执行 `pm clear`
 - 不碰照片、视频、聊天记录、文档等个人文件
@@ -47,22 +47,22 @@
 - **动态照片的伴生 MP4**——系统既不把它算图片，也不算视频，最后塞进“其他文件”；
 - 跨目录的完全重复文件（聊天应用保存、互传、办公套件、下载）。
 
-这些都不需要 Root，用 ADB 就能看到。问题是手工 `du` + `find` 很容易误删。`adbclean` 把这次“审计 → 分类 → 白名单清理”的过程固化成一个可重复、可审查的工具。
+这些都不需要 Root，用 ADB 就能看到。问题是手工 `du` + `find` 很容易误删。`klean` 把这次“审计 → 分类 → 白名单清理”的过程固化成一个可重复、可审查的工具。
 
 ## 功能
 
 | 命令 | 作用 | 会删除文件吗 |
 |---|---|---|
-| `adbclean devices` | 列出已连接设备 | 否 |
-| `adbclean info` | 设备、存储、缓存、多用户概览 | 否 |
-| `adbclean scan` | 扫描 `/sdcard`，缓存完整文件清单 | 否 |
-| `adbclean report` | 生成 Markdown + HTML 审计报告 | 否 |
-| `adbclean junk` | 清理白名单缓存/缩略图目录 | 仅 `--apply` |
-| `adbclean dupes` | 按 MD5 找出完全重复文件，保留主干目录 | 仅 `--apply` |
-| `adbclean live` | 统计动态照片伴生 MP4，可备份后删除 | 仅 `--delete` |
-| `adbclean studio` | 本地 Web 工作台：浏览、压缩、替换实况照片 MP4 | 仅点击「应用到手机」 |
-| `adbclean apps` | 按应用统计 `/sdcard/Android/data` 占用 | 否 |
-| `adbclean all` | 扫描 + 报告 + 清理建议 | 否 |
+| `klean devices` | 列出已连接设备 | 否 |
+| `klean info` | 设备、存储、缓存、多用户概览 | 否 |
+| `klean scan` | 扫描 `/sdcard`，缓存完整文件清单 | 否 |
+| `klean report` | 生成 Markdown + HTML 审计报告 | 否 |
+| `klean junk` | 清理白名单缓存/缩略图目录 | 仅 `--apply` |
+| `klean dupes` | 按 MD5 找出完全重复文件，保留主干目录 | 仅 `--apply` |
+| `klean live` | 统计动态照片伴生 MP4，可备份后删除 | 仅 `--delete` |
+| `klean studio` | 本地 Web 工作台：浏览、压缩、替换实况照片 MP4 | 仅点击「应用到手机」 |
+| `klean apps` | 按应用统计 `/sdcard/Android/data` 占用 | 否 |
+| `klean all` | 扫描 + 报告 + 清理建议 | 否 |
 
 设计原则：**审计与删除分离；默认只读；白名单之外一律不动。**
 
@@ -117,12 +117,12 @@ DCIM > Pictures > Movies > Music/Documents > Download > 其他目录
 每次执行删除都会写入：
 
 ```text
-~/.cache/adbclean/manifests/20260102-030405-junk-dirs.tsv
-~/.cache/adbclean/manifests/20260102-030405-exact-duplicates.tsv
-~/.cache/adbclean/manifests/20260102-030405-live-photo-mp4.tsv
+~/.cache/klean/manifests/20260102-030405-junk-dirs.tsv
+~/.cache/klean/manifests/20260102-030405-exact-duplicates.tsv
+~/.cache/klean/manifests/20260102-030405-live-photo-mp4.tsv
 ```
 
-macOS 对应 `~/Library/Caches/adbclean/manifests/`，Windows 对应 `%LOCALAPPDATA%\adbclean\manifests\`。
+macOS 对应 `~/Library/Caches/klean/manifests/`，Windows 对应 `%LOCALAPPDATA%\klean\manifests\`。
 
 清单包含路径、体积，重复文件还包含 MD5 和保留副本的位置。
 
@@ -148,13 +148,13 @@ sudo apt install android-tools-adb ffmpeg
 # https://developer.android.com/tools/releases/platform-tools
 ```
 
-安装 `adbclean`：
+安装 `klean`：
 
 ```bash
-pipx install git+https://github.com/KKKKahn/adb-storage-cleaner.git
+pipx install git+https://github.com/KKKKahn/klean.git
 # 或
-git clone https://github.com/KKKKahn/adb-storage-cleaner.git
-cd adb-storage-cleaner
+git clone https://github.com/KKKKahn/klean.git
+cd klean
 python3 -m pip install -e .
 ```
 
@@ -165,6 +165,26 @@ python3 -m venv .venv
 . .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
 ```
+
+## macOS 应用
+
+[下载最新版 macOS 应用](https://github.com/KKKKahn/klean/releases/latest)
+
+- 面向 Apple Silicon（M1–M6），macOS 12 Monterey 及以上。
+- 内置 adb、ffmpeg、ffprobe 与 Python 运行时，不需要自己安装依赖。
+- 打开 App → 按提示连接手机并开启 USB 调试 → 识别后自动进入工作台（原生窗口 + WKWebView）。
+- 使用中拔线会提示断开，重新连接并解锁后自动恢复。
+- App 为 ad-hoc 签名、未公证：第一次打开请右键 App →「打开」；或在「系统设置 → 隐私与安全性」里选择「仍要打开」。
+- 所有处理都在本机完成，不上传文件。
+
+从源码构建：
+
+```bash
+./packaging/macos/build.sh
+# 输出 dist/klean-<version>-macos-arm64.dmg
+```
+
+构建脚本会下载 adb 与 ffmpeg；需要 Python 3.9+ 和网络。
 
 ## 平台支持
 
@@ -177,7 +197,7 @@ pip install -e .
 | Windows 10/11 | 可用（未做 Windows 真机回归） | 无，使用软件 veryfast | 需要 vivo/Google USB 驱动、Python、adb、ffmpeg 在 PATH |
 | Linux | 可用（软件编码） | 无 | 需要 adb 和 ffmpeg |
 
-Windows 上的备份目录是 `%APPDATA%\adbclean\studio\backups`，任务缓存在 `%LOCALAPPDATA%\adbclean\studio\jobs`。网页里的「恢复原文件」可以直接用；批次里的 `restore.sh` 是 POSIX 脚本，手动执行需要 Git Bash 或 WSL。
+Windows 上的备份目录是 `%APPDATA%\klean\studio\backups`，任务缓存在 `%LOCALAPPDATA%\klean\studio\jobs`。网页里的「恢复原文件」可以直接用；批次里的 `restore.sh` 是 POSIX 脚本，手动执行需要 Git Bash 或 WSL。
 
 Windows PowerShell 快速开始：
 
@@ -185,9 +205,9 @@ Windows PowerShell 快速开始：
 py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
-adbclean studio
+klean studio
 # adb/ffmpeg 不在 PATH 时：
-# adbclean studio --adb "C:\platform-tools\adb.exe" `
+# klean studio --adb "C:\platform-tools\adb.exe" `
 #   --ffmpeg "C:\ffmpeg\bin\ffmpeg.exe" --ffprobe "C:\ffmpeg\bin\ffprobe.exe"
 ```
 
@@ -198,40 +218,40 @@ Windows 没有 VideoToolbox，压缩会走软件 veryfast，速度和压缩率�
 ```bash
 # 1. 确认设备已授权
 adb devices
-adbclean devices
+klean devices
 
 # 2. 看设备与存储概览
-adbclean info
+klean info
 
 # 3. 扫描并生成报告（30–120 秒）
-adbclean scan
-adbclean report
+klean scan
+klean report
 open reports/report-*.html      # macOS
 # Windows: start reports\report-*.html
 
 # 4. 先看能清什么（dry-run，不删除）
-adbclean junk
+klean junk
 
 # 5. 确认后执行
-adbclean junk --apply
+klean junk --apply
 
 # 6. 精确重复（dry-run，默认只处理 >= 1 MB）
-adbclean dupes
+klean dupes
 
 # 7. 动态照片统计（只读）
-adbclean live
+klean live
 
 # 8. 打开实况照片压缩工作台
-adbclean studio
+klean studio
 ```
 
 ### 多设备
 
 ```bash
-adbclean devices
-adbclean --serial 0123456789ABCDEF scan
+klean devices
+klean --serial 0123456789ABCDEF scan
 # 或
-adbclean scan --serial 0123456789ABCDEF
+klean scan --serial 0123456789ABCDEF
 ```
 
 也可以设置 `ANDROID_SERIAL` 环境变量。
@@ -241,19 +261,19 @@ adbclean scan --serial 0123456789ABCDEF
 ### `scan`
 
 ```bash
-adbclean scan
-adbclean scan --root /sdcard/DCIM --timeout 600
+klean scan
+klean scan --root /sdcard/DCIM --timeout 600
 ```
 
-扫描结果缓存在 `~/.cache/adbclean/scan-<序列号>.json.gz`。后续命令加 `--cached` 可复用，不必每次重扫。
+扫描结果缓存在 `~/.cache/klean/scan-<序列号>.json.gz`。后续命令加 `--cached` 可复用，不必每次重扫。
 
 > 扫描使用 `du -ab`（apparent size），可能和实际磁盘占用略有差异（压缩、稀疏文件、文件系统块对齐）。这是为了通用性做的取舍，见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ### `report`
 
 ```bash
-adbclean report
-adbclean report --cached --out ./reports --no-html
+klean report
+klean report --cached --out ./reports --no-html
 ```
 
 生成内容：
@@ -271,9 +291,9 @@ adbclean report --cached --out ./reports --no-html
 ### `junk`
 
 ```bash
-adbclean junk                 # dry-run
-adbclean junk --apply         # 执行，删除前会要求确认
-adbclean junk --apply --yes   # 非交互环境
+klean junk                 # dry-run
+klean junk --apply         # 执行，删除前会要求确认
+klean junk --apply --yes   # 非交互环境
 ```
 
 只删白名单目录。缓存会被应用重新生成，所以释放量可能随后回落，这是正常的。
@@ -281,10 +301,10 @@ adbclean junk --apply --yes   # 非交互环境
 ### `dupes`
 
 ```bash
-adbclean dupes                        # dry-run
-adbclean dupes --min-size 500K
-adbclean dupes --apply                # 执行
-adbclean dupes --apply --no-verify    # 跳过删除前的保留副本校验（不推荐）
+klean dupes                        # dry-run
+klean dupes --min-size 500K
+klean dupes --apply                # 执行
+klean dupes --apply --no-verify    # 跳过删除前的保留副本校验（不推荐）
 ```
 
 流程：
@@ -301,8 +321,8 @@ adbclean dupes --apply --no-verify    # 跳过删除前的保留副本校验（�
 ### `live`
 
 ```bash
-adbclean live                                   # 只统计
-adbclean live --delete --backup ./live-backup   # 先备份，再删除 mp4
+klean live                                   # 只统计
+klean live --delete --backup ./live-backup   # 先备份，再删除 mp4
 ```
 
 动态照片 = JPG + 约 1.5 秒的 MP4。工具只匹配：
@@ -329,8 +349,8 @@ cd live-backup && ./restore.sh
 ### `apps`
 
 ```bash
-adbclean apps
-adbclean apps --cached
+klean apps
+klean apps --cached
 ```
 
 按包名统计 `/sdcard/Android/data` 与 `/obb` 的占用，并标注用户应用/系统应用。不含 `/data/data` 的内部数据（那部分需要 Root）。
@@ -339,14 +359,14 @@ adbclean apps --cached
 
 vivo 实况照片 = 同名 JPG（定格画面）+ 约 2 秒的 MP4（动态片段）。系统把伴生 MP4 排除在“图片”和“视频”之外，所以 大容量手机里几十 GB 会落到“其他文件”。
 
-`adbclean studio` 在电脑上开一个本地网页，用来看图、选图、压缩 MP4，然后原子替换回手机。**JPG 永远不动。**
+`klean studio` 在电脑上开一个本地网页，用来看图、选图、压缩 MP4，然后原子替换回手机。**JPG 永远不动。**
 
 ```bash
-adbclean studio                 # 用上次扫描缓存，自动打开浏览器
-adbclean studio --rescan        # 启动前重新扫描
-adbclean studio --cached        # 强制使用缓存
-adbclean studio --port 8765 --no-browser
-adbclean studio --include-unknown
+klean studio                 # 用上次扫描缓存，自动打开浏览器
+klean studio --rescan        # 启动前重新扫描
+klean studio --cached        # 强制使用缓存
+klean studio --port 8765 --no-browser
+klean studio --include-unknown
 ```
 
 默认只监听 `127.0.0.1`，每次启动生成随机 token；网页没有外部 CDN 或网络请求。
@@ -385,7 +405,7 @@ macOS 上默认用 VideoToolbox 硬件编码；其他系统或 ffmpeg 不支持�
 | 均衡 | libx264 medium | 体积更小一点 |
 | 最小体积 | libx264 slow | 最慢，压缩率最高 |
 
-SSIM 默认关闭（计算需要额外解码两段视频）；解码完整性校验仍会执行。压缩默认自动选择并发：Apple Silicon 硬件编码且 CPU ≥ 12 核时 6 路，其余 3 路；应用默认 4 路并发，可在 `adbclean studio --workers 6 --apply-workers 4` 调整。
+SSIM 默认关闭（计算需要额外解码两段视频）；解码完整性校验仍会执行。压缩默认自动选择并发：Apple Silicon 硬件编码且 CPU ≥ 12 核时 6 路，其余 3 路；应用默认 4 路并发，可在 `klean studio --workers 6 --apply-workers 4` 调整。
 
 在 M6（12 核）真机 24 张样本上，6 路硬件编码比 3 路快约 23%（4.44s → 3.40s）；8 路没有进一步收益。硬件解码、`-realtime`、`-prio_speed` 实测均未提速，因此保持当前路径。
 
@@ -427,7 +447,7 @@ MP4 末尾有一个顶层 `uuid` box（`vivoMediaExtInfo`），里面包含 live
 
 - 不再限制单次 500 个。界面建议每批约 **200 个**（或 10–15 GB），大批量仍可执行。
 - 空间不足时不会整批拒绝：先处理能容纳的文件，剩余标记为空间不足；应用后再执行即可继续。
-- 每次「应用到手机」都会写入本机历史：`~/Library/Application Support/adbclean/studio/history.json`（Windows: `%APPDATA%\adbclean\studio\history.json`）。
+- 每次「应用到手机」都会写入本机历史：`~/Library/Application Support/klean/studio/history.json`（Windows: `%APPDATA%\klean\studio\history.json`）。
 - 历史匹配时，照片卡片右上角显示小勾图标（悬停可看 CRF/体积）；全选默认跳过这些照片。
 - 需要再次压缩时，勾选「允许更深压缩」；只有更高 CRF / 更小体积档位才会执行，否则会在结果里说明并跳过。
 - 恢复原图会自动移除对应历史，之后可以重新正常压缩。
@@ -439,7 +459,7 @@ MP4 末尾有一个顶层 `uuid` box（`vivoMediaExtInfo`），里面包含 live
 
 ```text
 # macOS
-~/Library/Application Support/adbclean/studio/backups/20260103-040506/
+~/Library/Application Support/klean/studio/backups/20260103-040506/
   sdcard/DCIM/Camera/IMG_20260103_040506.mp4
   manifest.tsv
   restore.sh
@@ -454,7 +474,7 @@ MP4 末尾有一个顶层 `uuid` box（`vivoMediaExtInfo`），里面包含 live
 - 每个批次也有 `restore.sh`，可以脱离 Studio 手动执行：
 
 ```bash
-cd ~/Library/Application\ Support/adbclean/studio/backups/20260103-040506
+cd ~/Library/Application\ Support/klean/studio/backups/20260103-040506
 ./restore.sh
 ```
 
@@ -464,7 +484,7 @@ cd ~/Library/Application\ Support/adbclean/studio/backups/20260103-040506
 
 备份大约等于原始 MP4 的总体积（硬链接不额外占用）。例如本机剩 27 GB，建议每批选择 10–15 GB 原始 MP4，压缩并应用后再处理下一批。
 
-macOS 上备份位于 `Application Support`，不会被系统当缓存清理；`~/Library/Caches/adbclean/studio/jobs` 里的任务临时文件可以随时删除。
+macOS 上备份位于 `Application Support`，不会被系统当缓存清理；`~/Library/Caches/klean/studio/jobs` 里的任务临时文件可以随时删除。
 
 更细的参数、验证方法和限制见 [docs/COMPRESSION.md](docs/COMPRESSION.md)。
 
@@ -484,7 +504,7 @@ macOS 上备份位于 `Application Support`，不会被系统当缓存清理；`
 | **其他系统资源** | **31.55 GB** |
 | 已用占比 | 约 86% |
 
-用 `adbclean scan` 看到的真实文件：
+用 `klean scan` 看到的真实文件：
 
 | 真实分类 | 体积 |
 |---|---:|
@@ -507,7 +527,7 @@ macOS 上备份位于 `Application Support`，不会被系统当缓存清理；`
 所以，如果你看到“其他”特别大，先跑：
 
 ```bash
-adbclean live
+klean live
 ```
 
 看看到底是不是动态照片，再决定要不要为了空间放弃动效。**不要直接按“其他文件”乱删。**
@@ -532,7 +552,7 @@ adbclean live
 十万级文件通常 30–120 秒。保持手机解锁，避免省电模式杀 ADB。可以先用 `--root /sdcard/DCIM` 扫子目录试一下。
 
 **Q：清理后空间没变？**
-缓存会被应用立刻重建；部分文件系统统计有延迟。用 `adbclean info` 看 `df` 的实际变化。
+缓存会被应用立刻重建；部分文件系统统计有延迟。用 `klean info` 看 `df` 的实际变化。
 
 **Q：为什么 `junk` 不删 `Android/data` 里的照片/原片？**
 因为无法判断应用是否依赖它。工具只自动删缓存类目录；原片、数据库、媒体库一律列为“需人工确认”。
@@ -552,8 +572,8 @@ adbclean live
 ## 开发
 
 ```bash
-git clone https://github.com/KKKKahn/adb-storage-cleaner.git
-cd adb-storage-cleaner
+git clone https://github.com/KKKKahn/klean.git
+cd klean
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
@@ -565,7 +585,7 @@ ruff check src tests
 项目结构：
 
 ```text
-src/adbclean/
+src/klean/
   adb.py        # adb 封装、df/diskstats/MediaStore
   scan.py       # du 扫描、缓存
   classify.py   # 分类、白名单、保留策略、安全护栏
@@ -583,7 +603,7 @@ docs/           # 安全模型、设计、兼容性
 
 ## English
 
-**adbclean** is a cross-platform CLI that audits and safely cleans Android storage over ADB — no root, no `pm clear`, no system modifications.
+**Klean** is a cross-platform CLI that audits and safely cleans Android storage over ADB — no root, no `pm clear`, no system modifications.
 
 - `scan` / `report`: inventory `/sdcard`, classify files, generate Markdown + HTML reports.
 - `junk`: delete only whitelisted cache/thumbnail/temp/log directories (dry-run by default).
@@ -596,10 +616,10 @@ Requirements: Python 3.9+, Android Platform Tools, Android 8+. iPhone is not sup
 Safety: read-only by default; destructive commands require `--apply`/`--delete`; every deletion is recorded in a local TSV manifest; privacy space / app clones (secondary users) are never touched.
 
 ```bash
-pipx install git+https://github.com/KKKKahn/adb-storage-cleaner.git
-adbclean report
-adbclean junk          # dry-run
-adbclean junk --apply  # explicit
+pipx install git+https://github.com/KKKKahn/klean.git
+klean report
+klean junk          # dry-run
+klean junk --apply  # explicit
 ```
 
 ## 免责声明

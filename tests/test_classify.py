@@ -1,6 +1,6 @@
 import pytest
 
-from adbclean.classify import (
+from klean.classify import (
     assert_cleanable,
     file_category,
     is_auto_deletable_app_file,
@@ -10,8 +10,8 @@ from adbclean.classify import (
     keep_score,
     top_level_dir,
 )
-from adbclean.scan import Entry
-from adbclean.util import SafetyError, human, parse_size
+from klean.scan import Entry
+from klean.util import SafetyError, human, parse_size
 
 
 def test_file_category():

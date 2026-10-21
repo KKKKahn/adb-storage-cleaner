@@ -1,12 +1,12 @@
 import os
 
-from adbclean.live import (
+from klean.live import (
     _write_restore_script,
     find_pairs,
     month_stats,
     total_size,
 )
-from adbclean.scan import Entry
+from klean.scan import Entry
 
 
 def entries():

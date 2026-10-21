@@ -185,7 +185,7 @@ def render_markdown(data: ReportData) -> str:
         lines.append("")
         lines.append(f"**合计：{human(data.junk_total)}**（白名单只含缓存、缩略图、临时/日志目录）")
         lines.append("")
-        lines.append("清理命令：`adbclean junk --apply`（默认 dry-run，不会自动执行）。")
+        lines.append("清理命令：`klean junk --apply`（默认 dry-run，不会自动执行）。")
     else:
         lines.append("未发现白名单内的缓存/缩略图目录。")
     lines.append("")
@@ -222,7 +222,7 @@ def render_markdown(data: ReportData) -> str:
             lines.append("")
         lines.append(
             "本工具**不会**在 `junk`/`dupes` 中删除这些文件。"
-            "如果确认不需要动效，可先备份再执行 `adbclean live --delete --backup DIR`。"
+            "如果确认不需要动效，可先备份再执行 `klean live --delete --backup DIR`。"
         )
         lines.append("")
 
@@ -321,7 +321,7 @@ def render_html(data: ReportData) -> str:
             '<p class="warn">合计 <strong>'
             + html.escape(human(data.junk_total))
             + "</strong>。只包含缓存、缩略图、临时/日志目录；清理命令："
-            + "<code>adbclean junk --apply</code>。</p>"
+            + "<code>klean junk --apply</code>。</p>"
         )
     else:
         parts.append("<p>未发现白名单内的缓存/缩略图目录。</p>")
@@ -331,7 +331,7 @@ def render_html(data: ReportData) -> str:
         parts.append(
             '<p class="warn">动态照片 = JPG + 短 MP4。很多系统把伴生 MP4 排除在'
             "“图片/视频”之外，所以它计入“其他文件”。本工具只统计，"
-            "不会在 junk/dupes 中删除；需要时用 <code>adbclean live --delete --backup DIR</code>。</p>"
+            "不会在 junk/dupes 中删除；需要时用 <code>klean live --delete --backup DIR</code>。</p>"
         )
         rows = [[month, f"{count:,}", human(size)] for month, count, size in month_stats(data.live_pairs)]
         parts.append(_html_table(["年月", "数量", "体积"], rows, numeric=(1, 2)))
