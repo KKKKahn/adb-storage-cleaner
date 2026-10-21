@@ -183,6 +183,11 @@ async function loadSummary() {
       message: '本机磁盘剩余 ' + formatBytes(summary.local_free) + '，批量压缩可能空间不足，建议分批。',
       tone: 'warn',
     };
+  } else if (summary.hardware && !summary.hardware.ok) {
+    notice = {
+      message: '当前系统未检测到硬件编码，将使用软件 veryfast；功能完整，速度会比 macOS 硬件编码慢。',
+      tone: '',
+    };
   } else if (summary.scanned_at) {
     const scanned = Date.parse(summary.scanned_at);
     if (!Number.isNaN(scanned) && Date.now() - scanned > 2 * 3600 * 1000) {

@@ -166,6 +166,33 @@ python3 -m venv .venv
 pip install -e .
 ```
 
+## 平台支持
+
+核心功能只依赖 Python、ADB 和 ffmpeg，不依赖 macOS 专有接口；只有“硬件加速”是 macOS 专有的。
+
+| 平台 | 状态 | 硬件编码 | 说明 |
+|---|---|---|---|
+| macOS（Apple Silicon） | 已验证 | VideoToolbox | 默认硬件 3 路压缩 |
+| 其他 Mac（Intel） | 可用 | VideoToolbox（ffmpeg 支持时） | 不支持时自动回退软件 |
+| Windows 10/11 | 可用（未做 Windows 真机回归） | 无，使用软件 veryfast | 需要 vivo/Google USB 驱动、Python、adb、ffmpeg 在 PATH |
+| Linux | 可用（软件编码） | 无 | 需要 adb 和 ffmpeg |
+
+Windows 上的备份目录是 `%APPDATA%\adbclean\studio\backups`，任务缓存在 `%LOCALAPPDATA%\adbclean\studio\jobs`。网页里的「恢复原文件」可以直接用；批次里的 `restore.sh` 是 POSIX 脚本，手动执行需要 Git Bash 或 WSL。
+
+Windows PowerShell 快速开始：
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+adbclean studio
+# adb/ffmpeg 不在 PATH 时：
+# adbclean studio --adb "C:\platform-tools\adb.exe" `
+#   --ffmpeg "C:\ffmpeg\bin\ffmpeg.exe" --ffprobe "C:\ffmpeg\bin\ffprobe.exe"
+```
+
+Windows 没有 VideoToolbox，压缩会走软件 veryfast，速度和压缩率仍可用，但比 Mac 硬件编码慢；界面会显示“未检测到硬件编码”的提示。手机端仍需要安装对应厂商的 USB 驱动并授权 USB 调试。
+
 ## 快速开始
 
 ```bash

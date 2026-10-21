@@ -61,10 +61,17 @@
 
 | 系统 | 状态 | 备注 |
 |---|---|---|
-| macOS | 已验证 | `brew install android-platform-tools` |
-| Linux | 预期兼容 | 需要 udev 规则；`apt install android-tools-adb` |
-| Windows | 预期兼容 | 需要 platform-tools 在 PATH；`restore.sh` 用 Git Bash/WSL 执行 |
+| macOS Apple Silicon | 已验证 | `brew install android-platform-tools ffmpeg`；VideoToolbox 硬件编码 |
+| macOS Intel | 可用 | 视 ffmpeg/VideoToolbox 支持情况自动选择硬件或软件 |
+| Linux | 可用（软件编码） | 需要 udev 规则；`apt install android-tools-adb ffmpeg` |
+| Windows 10/11 | 可用（软件编码，未做真机回归） | platform-tools、Python、ffmpeg 在 PATH；需要 vivo/Google USB 驱动 |
 | WSL | 有限支持 | USB 需要 usbipd 转发；更推荐原生 Windows |
+
+Windows 说明：
+
+- 核心代码只用 Python 标准库、ADB 和 ffmpeg，路径处理已兼容 Windows；备份在 `%APPDATA%\adbclean\studio\backups`。
+- 没有 VideoToolbox，默认使用软件 veryfast；网页恢复功能正常，`restore.sh` 需要 Git Bash/WSL。
+- Windows 未做真机回归测试；遇到 ADB/驱动问题先确认 `adb devices` 能看到设备。
 
 ## ADB 版本
 

@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和语义化版本。
 
+## [0.2.4] - 2026-10-21
+
+### Added
+
+- 工作台在未检测到硬件编码时显示提示，并明确回退到软件 veryfast。
+- README 增加平台支持、Windows 安装步骤和备份/恢复路径说明。
+- `docs/COMPATIBILITY.md` 增加 macOS / Windows / Linux 的能力矩阵。
+
+### Notes
+
+- 核心功能跨平台；VideoToolbox 硬件编码仅 macOS 可用。
+- Windows 使用软件编码，未做 Windows 真机回归；网页恢复可用，`restore.sh` 需要 Git Bash/WSL。
+
 ## [0.2.3] - 2026-10-21
 
 ### Changed
