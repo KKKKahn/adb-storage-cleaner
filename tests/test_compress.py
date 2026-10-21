@@ -4,6 +4,7 @@ import subprocess
 
 import pytest
 
+import adbclean.compress as compress_module
 from adbclean.compress import (
     PRESETS,
     CompressError,
@@ -416,6 +417,44 @@ HAS_VT = bool(FFMPEG) and b"h264_videotoolbox" in subprocess.run(
 @pytest.mark.skipif(not HAS_VT, reason="h264_videotoolbox not available")
 def test_detect_hardware_encoder():
     assert detect_hardware_encoder(FFMPEG) == "h264_videotoolbox"
+
+
+@pytest.mark.skipif(not (FFMPEG and FFPROBE), reason="ffmpeg/ffprobe not installed")
+def test_compress_file_falls_back_to_software(tmp_path, monkeypatch):
+    source = tmp_path / "src.mp4"
+    subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=640x480:rate=30:duration=1",
+            "-c:v", "libx264", "-b:v", "8M", "-pix_fmt", "yuv420p", str(source),
+        ],
+        check=True,
+    )
+    with open(source, "ab") as handle:
+        handle.write(make_uuid_box())
+    original = compress_module.encode_video
+    calls = []
+
+    def fake_encode(*args, **kwargs):
+        speed = kwargs.get("speed", "slow")
+        calls.append(speed)
+        if speed == "hardware":
+            raise compress_module.HardwareEncoderError("cannot prepare encoder: -12902")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(compress_module, "encode_video", fake_encode)
+    result = compress_module.compress_file(
+        str(source),
+        str(tmp_path / "out.mp4"),
+        PRESETS["balanced"],
+        ffmpeg=FFMPEG,
+        ffprobe=FFPROBE,
+        speed="hardware",
+        compute_ssim=False,
+    )
+    assert calls[0] == "hardware"
+    assert result.speed_used == "veryfast"
+    assert "回退软件" in result.fallback_note
 
 
 @pytest.mark.skipif(not HAS_VT, reason="h264_videotoolbox not available")

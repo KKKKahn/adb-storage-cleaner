@@ -122,6 +122,7 @@ SPEED_LABELS = {
     "slow": "最小体积",
 }
 SPEED_ORDER = ["hardware", "veryfast", "medium", "slow"]
+MIN_HARDWARE_SAVINGS = 0.10
 
 CUSTOM_CRF_MIN = 1
 CUSTOM_CRF_MAX = 51
@@ -668,9 +669,11 @@ def compress_file(
 ) -> CompressResult:
     """Compress one MP4 into ``dst``; never modifies ``src``.
 
-    Hardware sessions can fail under resource pressure or unusual frame
-    geometry; retry once in software. If the chosen quality would grow the
-    file, hardware quality is lowered step by step before giving up.
+    Hardware encoding is fast but at a fixed high quality it can save very
+    little on already-efficient sources. If savings are below 10%, retry
+    with software x264 at the same CRF, then (for the balanced preset) at
+    CRF23. The smallest profitable result wins; otherwise the file is
+    skipped. VideoToolbox init failures fall back to software directly.
     """
     info = probe_video(src, ffprobe)
     reason = hdr_reason(info)
@@ -686,77 +689,121 @@ def compress_file(
     os.makedirs(directory, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".adbclean-", suffix=".mp4")
     os.close(fd)
-    audio_reencoded = False
-    used_speed = speed
-    used_q: Optional[int] = None
+    best_path = temp_path + ".best.mp4"
+
+    best_size: Optional[int] = None
+    best_speed = speed
+    best_q: Optional[int] = None
+    best_audio = False
+    best_label = ""
+    hardware_failed = False
     fallback_notes: List[str] = []
-    quality_note = ""
 
-    if preset.mode == "copy":
-        attempts = [(speed, None)]
-    elif speed == "hardware":
-        base_q = hardware_quality(preset.crf)
-        attempts = [("hardware", None)]
-        attempts.extend(("hardware", q) for q in (50, 45) if q < base_q)
-    else:
-        attempts = [(speed, None)]
+    def run_attempt(attempt_speed: str, attempt_q: Optional[int], attempt_preset: Preset):
+        audio = encode_video(
+            src,
+            temp_path,
+            attempt_preset,
+            info,
+            ffmpeg,
+            timeout,
+            speed=attempt_speed,
+            hardware_q=attempt_q,
+        )
+        if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
+            raise NoVivoUuid(
+                "原 MP4 没有 vivoMediaExtInfo uuid box，可能不是 vivo 实况照片"
+            )
+        if not require_vivo_uuid:
+            append_vivo_uuid_box(src, temp_path)
+        verify_decodable(temp_path, ffmpeg, timeout)
+        return os.path.getsize(temp_path), audio
 
-    ssim: Optional[float] = None
+    def record(size: int, audio: bool, attempt_speed: str, attempt_q: Optional[int], label: str):
+        nonlocal best_size, best_speed, best_q, best_audio, best_label
+        if preset.mode != "copy" and not is_profitable(original_size, size):
+            return False
+        if best_size is None or size < best_size:
+            os.replace(temp_path, best_path)
+            best_size = size
+            best_speed = attempt_speed
+            best_q = attempt_q
+            best_audio = audio
+            best_label = label
+        return True
+
+    def savings_pct(size: int) -> float:
+        return (original_size - size) / original_size if original_size else 0.0
+
+    hardware_ok = False
+    hardware_size = 0
     try:
-        index = 0
-        while index < len(attempts):
-            attempt_speed, attempt_q = attempts[index]
+        if preset.mode == "copy":
+            size, audio = run_attempt(speed, None, preset)
+            record(size, audio, speed, None, "无损重封装")
+        elif speed != "hardware":
+            size, audio = run_attempt(speed, None, preset)
+            record(size, audio, speed, None, f"软件 {speed}")
+        else:
+            hardware_ok = False
+            hardware_size = 0
             try:
-                audio_reencoded = encode_video(
-                    src,
-                    temp_path,
-                    preset,
-                    info,
-                    ffmpeg,
-                    timeout,
-                    speed=attempt_speed,
-                    hardware_q=attempt_q,
+                hardware_size, hardware_audio = run_attempt("hardware", None, preset)
+                hardware_ok = True
+                record(
+                    hardware_size,
+                    hardware_audio,
+                    "hardware",
+                    hardware_quality(preset.crf),
+                    "硬件加速",
                 )
             except HardwareEncoderError:
-                if attempt_speed == "hardware":
-                    used_speed = "veryfast"
-                    attempts = [("veryfast", None)]
-                    index = 0
-                    fallback_notes.append("硬件编码初始化失败，已回退软件 veryfast")
-                    continue
-                raise
+                hardware_failed = True
 
-            if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
-                raise NoVivoUuid(
-                    "原 MP4 没有 vivoMediaExtInfo uuid box，可能不是 vivo 实况照片"
-                )
-            if not require_vivo_uuid:
-                append_vivo_uuid_box(src, temp_path)
-            verify_decodable(temp_path, ffmpeg, timeout)
-            compressed_size = os.path.getsize(temp_path)
-            if preset.mode == "copy" or is_profitable(original_size, compressed_size):
-                used_speed = attempt_speed
-                used_q = attempt_q
-                break
+            hardware_savings = savings_pct(hardware_size) if hardware_ok else 0.0
+            need_software = (
+                hardware_failed
+                or not hardware_ok
+                or hardware_size >= original_size
+                or hardware_savings < MIN_HARDWARE_SAVINGS
+            )
+            if need_software:
+                software_size, software_audio = run_attempt("veryfast", None, preset)
+                software_savings = savings_pct(software_size)
+                record(software_size, software_audio, "veryfast", None, f"软件 CRF{preset.crf}")
+                if preset.key == "balanced" and software_savings < MIN_HARDWARE_SAVINGS:
+                    small_preset = PRESETS["small"]
+                    small_size, small_audio = run_attempt("veryfast", None, small_preset)
+                    record(small_size, small_audio, "veryfast", None, "软件 CRF23")
 
-            index += 1
-            if index >= len(attempts):
-                raise NoBenefit(
-                    f"压缩后没有变小（{original_size} → {compressed_size} 字节），已放弃"
-                )
-            next_q = attempts[index][1]
-            quality_note = f"当前质量收益不足，已自动降到 q{next_q}"
+        if best_size is None:
+            raise NoBenefit(
+                f"压缩后没有变小（{original_size} 字节），已尝试硬件和软件编码"
+            )
 
-        if quality_note:
-            fallback_notes.append(quality_note)
+        hardware_profitable = hardware_ok and hardware_size < original_size
+        if hardware_failed:
+            fallback_notes.append("硬件编码初始化失败，已回退软件")
+        elif speed == "hardware" and best_label and best_label != "硬件加速":
+            prefix = (
+                f"硬件节省不足 {MIN_HARDWARE_SAVINGS:.0%}"
+                if hardware_profitable
+                else "硬件编码无收益"
+            )
+            fallback_notes.append(f"{prefix}，已改用{best_label}")
+        elif speed == "hardware" and best_label == "硬件加速":
+            saved = savings_pct(best_size)
+            if saved < MIN_HARDWARE_SAVINGS:
+                fallback_notes.append(f"源文件已较紧凑，实际节省 {saved:.1%}")
         if (info.width % 2 or info.height % 2) and preset.mode != "copy":
             fallback_notes.append("奇数分辨率已裁掉 1 像素")
-        if compute_ssim:
-            ssim = measure_ssim(src, temp_path, ffmpeg, timeout)
-        os.replace(temp_path, dst)
+
+        ssim = measure_ssim(src, best_path, ffmpeg, timeout) if compute_ssim else None
+        os.replace(best_path, dst)
     except Exception:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
+        for path in (temp_path, best_path):
+            if os.path.exists(path):
+                os.unlink(path)
         raise
 
     compressed_size = os.path.getsize(dst)
@@ -768,9 +815,9 @@ def compress_file(
         ssim=ssim,
         duration=info.duration,
         uuid_preserved=extract_vivo_uuid_box(dst) is not None,
-        audio_reencoded=audio_reencoded,
-        speed_used=used_speed,
-        hardware_quality_used=used_q,
+        audio_reencoded=best_audio,
+        speed_used=best_speed,
+        hardware_quality_used=best_q,
         fallback_note="；".join(fallback_notes),
     )
 
