@@ -14,6 +14,7 @@
 - 不碰照片、视频、聊天记录、文档等个人文件
 - 不扫描隐私空间（User 666）和应用分身（User 999）
 - 删除前可预览、可确认、可追溯；动态照片支持先备份再删
+- 实况照片可在浏览器里按日期/相册挑选，压缩伴生 MP4 后原子替换；JPG 定格画面永不修改
 
 > iPhone 不支持。iOS 没有 ADB 这类通用调试通道，清理方式完全不同。
 
@@ -27,6 +28,7 @@
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [命令详解](#命令详解)
+- [实况照片压缩工作台](#实况照片压缩工作台)
 - [真实案例：82.67 GB 的“其他文件”](#真实案例8267-gb的其他文件)
 - [兼容性](#兼容性)
 - [常见问题](#常见问题)
@@ -58,6 +60,7 @@
 | `adbclean junk` | 清理白名单缓存/缩略图目录 | 仅 `--apply` |
 | `adbclean dupes` | 按 MD5 找出完全重复文件，保留主干目录 | 仅 `--apply` |
 | `adbclean live` | 统计动态照片伴生 MP4，可备份后删除 | 仅 `--delete` |
+| `adbclean studio` | 本地 Web 工作台：浏览、压缩、替换实况照片 MP4 | 仅点击「应用到手机」 |
 | `adbclean apps` | 按应用统计 `/sdcard/Android/data` 占用 | 否 |
 | `adbclean all` | 扫描 + 报告 + 清理建议 | 否 |
 
@@ -71,15 +74,18 @@
 - 用 `md5sum` 在手机端计算候选文件的 MD5（只读）。
 - 用 `content query` 读取 MediaStore 的视频时长（只读）。
 - 删除时只执行 `rm -f` / `rm -rf`，目标必须通过白名单校验。
+- 压缩工作台只会替换**已在扫描清单中确认过 JPG + MP4 配对**的伴生 MP4；替换前把原文件备份到电脑并校验 MD5。
 
 ### 永远不会做什么
 
 - 不执行 `pm clear`（会清空应用数据）。
-- 不删除 `/sdcard/DCIM`、`Pictures`、`Movies`、`Music`、`Documents`、`Download` 里的个人文件。
+- 不删除或改写任何 JPG / JPEG；定格画面始终是原文件。
+- 未备份不覆盖：默认每次替换都先在本机备份原 MP4，失败可恢复。
+- 不删除 `/sdcard/DCIM`、`Pictures`、`Movies`、`Music`、`Documents`、`Download` 里的个人文件（`junk` 白名单之外）。
 - 不碰 `/sdcard/Android/obb`、`/sdcard/Android/media`。
 - 不扫描、不删除 `/storage/emulated/666`（隐私空间）、`/999`（应用分身）或其他多用户目录。
 - 不修改系统分区，不 Root，不刷机。
-- 不上传任何数据；工具没有网络请求（除了 `adb` 本机进程）。
+- 不上传任何数据；本地工作台只监听 `127.0.0.1`，没有外部网络请求。
 
 ### 删除白名单
 
@@ -128,15 +134,17 @@ macOS 对应 `~/Library/Caches/adbclean/manifests/`，Windows 对应 `%LOCALAPPD
 - Android Platform Tools（`adb`）在 `PATH` 中
 - 手机 Android **8.0+**（推荐 Android 10+），已开启“开发者选项 → USB 调试”
 - 数据线（不是“仅充电”线）
+- 压缩功能需要 **ffmpeg / ffprobe**（推荐 7.x）
 
 ```bash
 # macOS
-brew install android-platform-tools
+brew install android-platform-tools ffmpeg
 
 # Ubuntu / Debian
-sudo apt install android-tools-adb
+sudo apt install android-tools-adb ffmpeg
 
 # Windows：下载 platform-tools，解压后把目录加入 PATH
+# ffmpeg: https://www.gyan.dev/ffmpeg/builds/
 # https://developer.android.com/tools/releases/platform-tools
 ```
 
@@ -185,6 +193,9 @@ adbclean dupes
 
 # 7. 动态照片统计（只读）
 adbclean live
+
+# 8. 打开实况照片压缩工作台
+adbclean studio
 ```
 
 ### 多设备
@@ -296,6 +307,110 @@ adbclean apps --cached
 ```
 
 按包名统计 `/sdcard/Android/data` 与 `/obb` 的占用，并标注用户应用/系统应用。不含 `/data/data` 的内部数据（那部分需要 Root）。
+
+## 实况照片压缩工作台
+
+vivo 实况照片 = 同名 JPG（定格画面）+ 约 2 秒的 MP4（动态片段）。系统把伴生 MP4 排除在“图片”和“视频”之外，所以 512 GB 手机里几十 GB 会落到“其他文件”。
+
+`adbclean studio` 在电脑上开一个本地网页，用来看图、选图、压缩 MP4，然后原子替换回手机。**JPG 永远不动。**
+
+```bash
+adbclean studio                 # 用上次扫描缓存，自动打开浏览器
+adbclean studio --rescan        # 启动前重新扫描
+adbclean studio --cached        # 强制使用缓存
+adbclean studio --port 8765 --no-browser
+adbclean studio --include-unknown
+```
+
+默认只监听 `127.0.0.1`，每次启动生成随机 token；网页没有外部 CDN 或网络请求。
+
+### 界面功能
+
+- 左侧 **按日期**（年/月/日倒序）和 **按相册**（实际文件夹）两种浏览方式。
+- 打开即显示最近一天的缩略图；缩略图用 JPG 生成，按需拉取、本地缓存。
+- 支持「全选本日」「全选本月」「全选本相册」，选择可跨日期、跨相册保留。
+- 「已选照片」视图集中复核，再统一压缩。
+- 体积筛选（≥2/4/8/16 MB）、按时间/体积排序、一键选最大的 50 个。
+- 每张卡片显示时间、MP4 大小、时长；结果面板显示压缩前后大小、节省比例、SSIM，并可预览压缩版。
+
+### 压缩档位
+
+| 档位 | 参数 | 体积（实测样本） | 说明 |
+|---|---|---:|---|
+| 视觉无损 | H.264 CRF 18 | 56–59% | 最在意画质 |
+| 推荐 | H.264 CRF 20 | 43–45% | 默认，SSIM ≈ 0.99 |
+| 小体积 | H.264 CRF 23 | 29–30% | 建议先人眼确认 |
+| 自定义 | CRF 14–30 | 可变 | 自己权衡 |
+| 无损重封装 | `-c copy` | 几乎不变 | 像素完全不变，但不承诺减小体积 |
+
+> CRF18 是“视觉无损”，不是数学无损。真正的无损只有 stream copy 重封装，而它几乎不省空间。
+
+两段真机样本（1920×1080，H.264，P3，full-range）：
+
+| 样本 | 原始 | CRF20 + uuid | 节省 | SSIM |
+|---|---:|---:|---:|---:|
+| 横向 样本 A | 3,425,268 B | 1,458,780 B | 57.4% | 0.9920 |
+| 竖向 样本 B | 4,645,300 B | 2,068,829 B | 55.5% | 0.9888 |
+
+### 为什么需要保留 vivo uuid box
+
+MP4 末尾有一个顶层 `uuid` box（`vivoMediaExtInfo`），里面包含 livephoto ID。ffmpeg 重编码会丢掉它，相册就不再识别为实况照片。工具会从原 MP4 原样提取这个 box，追加到压缩文件末尾，再校验文件可解码。
+
+流程（每个文件）：
+
+1. 校验文件在扫描得到的 JPG + MP4 配对清单中；
+2. 拉取 MP4 到电脑，校验大小与 MD5；
+3. ffprobe 检查时长、编码、像素格式、色彩、旋转；
+4. 重编码 + 追加 uuid + 解码校验 + SSIM；
+5. 替换前再次读取手机 MD5，确认文件没被改动；
+6. 备份原 MP4 到电脑；
+7. push 临时文件 → 手机端 MD5 → `chmod 660` → 恢复 mtime → `mv -f` 原子替换；
+8. 再次 MD5 校验 → 媒体扫描 → 更新本地清单。
+
+以下情况默认**跳过**，不会冒险压缩：
+
+- HDR / 10-bit / BT.2020；
+- 非 `yuv420p` / `yuvj420p` 像素格式；
+- 时长超过 `--max-duration`（默认 5000 ms）；
+- 找不到同名 JPG；
+- 压缩后没有变小；
+- 原 MP4 没有 `vivoMediaExtInfo` uuid box；
+- 手机文件在压缩期间发生变化。
+
+### 备份与恢复
+
+备份放在电脑上，不占手机空间：
+
+```text
+# macOS
+~/Library/Application Support/adbclean/studio/backups/20260103-040506/
+  sdcard/DCIM/Camera/IMG_20260103_040506.mp4
+  manifest.tsv
+  restore.sh
+```
+
+- 每次「应用到手机」都会新建一个批次目录；`manifest.tsv` 记录原始大小、压缩大小、MD5、mtime。
+- 备份优先使用**硬链接**（与任务源文件共用数据块），通常不产生额外写入。
+- 应用成功后会删除任务目录里的源文件和压缩输出，只保留备份。
+- 点击顶部的「本地备份」可以查看所有批次并**批量恢复**；Studio 重启后仍然可用。
+- 恢复时逐文件校验：手机文件必须仍是我们替换后的压缩版，或被外部改过就跳过，避免覆盖新内容。
+- 应用完成后可「清除本批备份」；备份列表也支持删除单个批次或全部。删除不可逆，界面会二次确认。
+- 每个批次也有 `restore.sh`，可以脱离 Studio 手动执行：
+
+```bash
+cd ~/Library/Application\ Support/adbclean/studio/backups/20260103-040506
+./restore.sh
+```
+
+### 空间规划
+
+本机需要同时容纳「拉取的源文件 + 压缩输出」，估算约为所选 MP4 总体积的 **1.5 倍 + 256 MB**。工作台会在开始前检查，空间不足直接拒绝；每处理一个文件也会再检查一次。
+
+备份大约等于原始 MP4 的总体积（硬链接不额外占用）。例如本机剩 27 GB，建议每批选择 10–15 GB 原始 MP4，压缩并应用后再处理下一批。
+
+macOS 上备份位于 `Application Support`，不会被系统当缓存清理；`~/Library/Caches/adbclean/studio/jobs` 里的任务临时文件可以随时删除。
+
+更细的参数、验证方法和限制见 [docs/COMPRESSION.md](docs/COMPRESSION.md)。
 
 ## 真实案例：82.67 GB 的“其他文件”
 

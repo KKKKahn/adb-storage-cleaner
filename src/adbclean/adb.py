@@ -106,6 +106,38 @@ class ADB:
         result = self.run("pull", "-a", remote, local, timeout=timeout, check=False)
         return result.returncode == 0
 
+    def push(self, local: str, remote: str, timeout: int = 900) -> bool:
+        result = self.run("push", local, remote, timeout=timeout, check=False)
+        return result.returncode == 0
+
+    def remote_md5(self, path: str, timeout: int = 300) -> Optional[str]:
+        text = self.sh(f"md5sum {quote(path)}", timeout=timeout, check=False).strip()
+        if not text:
+            return None
+        digest = text.split()[0].lower()
+        if re.fullmatch(r"[0-9a-f]{32}", digest):
+            return digest
+        return None
+
+    def remote_mtime(self, path: str) -> Optional[int]:
+        text = self.sh(f"stat -c %Y {quote(path)}", check=False).strip()
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    def remote_mode(self, path: str) -> Optional[str]:
+        text = self.sh(f"stat -c %a {quote(path)}", check=False).strip()
+        return text or None
+
+    def media_scan(self, path: str) -> bool:
+        script = (
+            "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
+            f"-d {quote('file://' + path)}"
+        )
+        result = self.run("exec-out", "sh", "-c", script, timeout=60, check=False)
+        return result.returncode == 0
+
     # ------------------------------------------------------------------- devices
     @staticmethod
     def list_devices(adb_path: str = "adb") -> List[Device]:

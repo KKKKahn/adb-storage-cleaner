@@ -132,6 +132,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cached", action="store_true", help="使用上次扫描缓存")
     p.set_defaults(func=cmd_apps)
 
+    p = sub.add_parser("studio", parents=[common], help="启动实况照片压缩 Web 工作台")
+    p.add_argument("--cached", action="store_true", help="强制使用上次扫描缓存")
+    p.add_argument("--rescan", action="store_true", help="启动前重新扫描 /sdcard")
+    p.add_argument("--port", type=int, default=8765, help="本地端口（默认 8765）")
+    p.add_argument("--host", default="127.0.0.1", help="监听地址，仅允许本机（默认 127.0.0.1）")
+    p.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    p.add_argument("--max-duration", type=int, default=5000, help="实况 MP4 最大时长，毫秒（默认 5000）")
+    p.add_argument(
+        "--include-unknown",
+        action="store_true",
+        help="包含 MediaStore 查不到时长的配对（默认跳过）",
+    )
+    p.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg 路径（默认 ffmpeg）")
+    p.add_argument("--ffprobe", default="ffprobe", help="ffprobe 路径（默认 ffprobe）")
+    p.set_defaults(func=cmd_studio)
+
     p = sub.add_parser("all", parents=[common], help="扫描 + 报告 + 清理建议（只读）")
     p.add_argument("--out", default="reports", help="报告输出目录（默认 reports）")
     p.set_defaults(func=cmd_all)
@@ -564,6 +580,12 @@ def cmd_apps(args) -> int:
         style,
     )
     return 0
+
+
+def cmd_studio(args) -> int:
+    from .studio import serve
+
+    return serve(args)
 
 
 def cmd_all(args) -> int:

@@ -95,6 +95,33 @@ DCIM > Pictures > Movies > Music/Documents/Recordings > Download
 
 建议始终指定 `--backup DIR`。备份完成后会生成 `restore.sh`，可一键推回并触发媒体扫描。
 
+## 实况照片压缩的安全边界
+
+`adbclean studio` 是唯一会修改手机文件的子命令，边界如下：
+
+- **只改伴生 MP4。** JPG / JPEG 从不写入、不重命名、不删除。
+- **只处理验证过的配对。** 必须同时满足：`IMG_YYYYMMDD_HHMMSS.mp4`、同名 JPG 存在、MediaStore 时长 ≤ 5 秒。
+- **先备份再替换。** 原 MP4 备份到电脑，MD5 校验通过后才 push 临时文件。
+- **原子替换。** 临时文件与目标同目录，手机端 MD5 → `chmod` → 恢复 mtime → `mv -f`，避免出现半截文件。
+- **失败回滚。** `mv` 后任何校验失败，立即从备份恢复；恢复也失败时停止并保留备份。
+- **不确定就跳过。** HDR / 10-bit / BT.2020 / 异常像素格式 / 没有 vivo uuid / 压缩无收益 / 手机文件在压缩期间变化，全部不替换。
+- **没有“跳过备份”的极速模式。** 每条替换路径都必须先有可验证的备份。
+
+备份目录：
+
+```text
+# macOS
+~/Library/Application Support/adbclean/studio/backups/
+# Linux
+${XDG_DATA_HOME:-~/.local/share}/adbclean/studio/backups/
+# Windows
+%APPDATA%\adbclean\studio\backups\
+```
+
+每个批次包含 `manifest.tsv`（原始/压缩大小、双方 MD5、mtime）和 `restore.sh`。Studio 重启后仍可从「本地备份」批量恢复。
+
+**清除备份是不可逆操作。** 界面会二次确认；删除后无法再恢复原始 MP4。建议逐张确认相册动态正常后再删。
+
 ## 删除清单
 
 每次删除都会写入本机：
@@ -130,12 +157,14 @@ DCIM > Pictures > Movies > Music/Documents/Recordings > Download
 1. **误删了缓存目录**：应用会重新生成，通常无需处理。
 2. **误删了重复文件**：查看清单里的 MD5 和保留路径；如果保留副本还在，数据没有丢失。
 3. **误删了动态照片 MP4**：如果用了 `--backup`，进入备份目录执行 `./restore.sh`。
-4. **设备掉线**：重新插拔，确认 RSA 授权；已完成的删除不会回滚，但清单会保留。
-5. **报告数字异常**：重新 `scan`；不要依赖 `dumpsys diskstats` 的缓存值。
+4. **压缩后相册动态异常**：打开顶部「本地备份」，恢复对应批次；Studio 重启后也能恢复。
+5. **设备掉线**：重新插拔，确认 RSA 授权；已完成的删除不会回滚，但清单会保留。
+6. **报告数字异常**：重新 `scan`；不要依赖 `dumpsys diskstats` 的缓存值。
 
 ## 不保证的事情
 
 - 不保证清理后空间一定增加（缓存会重建、文件系统统计有延迟）。
 - 不保证能读取所有 OEM 的 `/sdcard/Android/data`（部分 ROM 会限制 shell 权限）。
 - 不保证 `du` 的 apparent size 等于实际磁盘占用（压缩、稀疏文件、块对齐会造成差异）。
-- 不保证能恢复没有备份的删除。
+- 不保证能恢复没有备份的删除，或已经清除备份的压缩替换。
+- 不保证电脑磁盘损坏、缓存目录被手动删除后还能恢复。

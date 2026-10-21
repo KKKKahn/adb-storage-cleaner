@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="adbclean-token" content="__ADBCLEAN_TOKEN__">
+<title>adbclean Studio · 实况照片压缩</title>
+<link rel="stylesheet" href="/static/style.css?v=0.2.0.1">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">ac</div>
+    <div>
+      <h1>adbclean Studio</h1>
+      <p class="sub" id="device-line">正在读取设备信息…</p>
+    </div>
+  </div>
+  <div class="top-stats">
+    <div class="stat"><span id="total-pairs">–</span><label>实况照片</label></div>
+    <div class="stat"><span id="total-size">–</span><label>伴生 MP4</label></div>
+    <button id="backup-btn" class="stat stat-button" type="button" title="查看电脑上的原始 MP4 备份">
+      <span id="backup-size">–</span><label>本地备份</label>
+    </button>
+  </div>
+  <div class="top-actions">
+    <button id="refresh-btn" class="ghost" type="button">刷新</button>
+    <button id="rescan-btn" class="ghost" type="button">重新扫描</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-tabs" role="tablist">
+      <button id="tab-date" class="side-tab active" type="button">按日期</button>
+      <button id="tab-album" class="side-tab" type="button">按相册</button>
+    </div>
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="搜索日期，如 2026-10" autocomplete="off">
+    </div>
+    <div class="side-summary">
+      <span id="selection-summary">未选择</span>
+      <button id="clear-selection" class="link" type="button">清空</button>
+    </div>
+    <nav id="month-list" class="month-list" aria-label="按日期或相册浏览"></nav>
+  </aside>
+
+  <main class="content" id="content">
+    <div class="content-top">
+      <div class="content-head">
+        <div>
+          <h2 id="view-title">最近的照片</h2>
+          <p id="view-sub" class="sub">正在加载…</p>
+        </div>
+        <div class="view-actions">
+          <button id="select-scope-btn" class="ghost" type="button">全选本日</button>
+          <button id="selected-view-btn" class="ghost" type="button">已选 0</button>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <label class="inline-field">
+          <span>体积</span>
+          <select id="size-filter">
+            <option value="0">全部</option>
+            <option value="2000000">≥ 2 MB</option>
+            <option value="4000000">≥ 4 MB</option>
+            <option value="8000000">≥ 8 MB</option>
+            <option value="16000000">≥ 16 MB</option>
+          </select>
+        </label>
+        <label class="inline-field">
+          <span>排序</span>
+          <select id="sort-select">
+            <option value="time" selected>按时间</option>
+            <option value="size">按体积从大到小</option>
+          </select>
+        </label>
+        <button id="largest-btn" class="ghost" type="button">选最大的 50 个</button>
+        <span id="filter-hint" class="sub"></span>
+      </div>
+
+      <div id="notice" class="notice hidden"></div>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <div class="empty-art" aria-hidden="true"></div>
+      <p>这里还没有可显示的照片。</p>
+      <p class="sub">选择左侧的日期，或等待扫描完成。</p>
+    </div>
+    <div id="load-more-wrap" class="load-more hidden">
+      <button id="load-more" class="ghost" type="button">加载更多</button>
+    </div>
+
+    <section id="job-panel" class="panel hidden" aria-live="polite">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h3 id="job-title">任务</h3>
+          <span id="job-counts" class="job-counts"></span>
+        </div>
+        <span id="job-status" class="pill"></span>
+      </div>
+      <div class="progress"><div id="job-progress"></div></div>
+      <p id="job-message" class="sub"></p>
+      <div id="job-items" class="result-list"></div>
+      <div id="job-actions" class="panel-actions"></div>
+    </section>
+  </main>
+</div>
+
+<div class="compress-bar">
+  <div class="selection-info">
+    <div><strong id="selected-count">0</strong> 个已选 · <span id="selected-size">0 B</span></div>
+    <div id="selection-estimate" class="sub"></div>
+  </div>
+  <div class="compress-controls">
+    <button id="bar-selected-btn" class="ghost" type="button">查看已选</button>
+    <label class="field">
+      <span>压缩档位</span>
+      <select id="preset">
+        <option value="visually_lossless">视觉无损 · CRF18</option>
+        <option value="balanced" selected>推荐 · CRF20</option>
+        <option value="small">小体积 · CRF23</option>
+        <option value="custom">自定义 CRF</option>
+        <option value="lossless">无损重封装（体积几乎不变）</option>
+      </select>
+    </label>
+    <label class="field hidden" id="crf-field">
+      <span>CRF</span>
+      <input id="crf" type="number" min="14" max="30" value="20">
+    </label>
+    <button id="compress-btn" class="primary" type="button" disabled>压缩所选</button>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card">
+    <h3 id="modal-title"></h3>
+    <div id="modal-body" class="modal-body"></div>
+    <div class="modal-actions">
+      <button id="modal-cancel" class="ghost" type="button">取消</button>
+      <button id="modal-ok" class="primary" type="button">确认</button>
+    </div>
+  </div>
+</div>
+
+<div id="preview" class="modal hidden" role="dialog" aria-modal="true" aria-label="压缩结果预览">
+  <div class="modal-card preview-card">
+    <div class="panel-head">
+      <h3 id="preview-title">预览</h3>
+      <button id="preview-close" class="ghost" type="button">关闭</button>
+    </div>
+    <video id="preview-video" controls playsinline></video>
+    <p id="preview-sub" class="sub"></p>
+  </div>
+</div>
+
+<div id="backup-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="本地备份与恢复">
+  <div class="modal-card backup-card">
+    <div class="panel-head">
+      <h3>本地备份与恢复</h3>
+      <button id="backup-close" class="ghost" type="button">关闭</button>
+    </div>
+    <p id="backup-sub" class="sub"></p>
+    <p id="backup-free" class="sub"></p>
+    <div id="backup-list" class="backup-list"></div>
+    <div class="panel-actions">
+      <button id="backup-clear-all" class="ghost danger-btn" type="button">清除全部备份</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden" role="status"></div>
+
+<script src="/static/app.js?v=0.2.0.1"></script>
+</body>
+</html>

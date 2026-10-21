@@ -2,6 +2,35 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和语义化版本。
 
+## [0.2.0] - 2026-10-21
+
+### Added
+
+- `studio`：本地 Web 工作台，按日期 / 月份 / 相册浏览实况照片，缩略图、多选、体积筛选、排序、一键选最大的 50 个。
+- 压缩引擎：视觉无损 CRF18、推荐 CRF20、小体积 CRF23、自定义 CRF、无损重封装。
+- 保留 vivo `vivoMediaExtInfo` uuid box，ffmpeg 重编码后原字节追加；JPG 从不修改。
+- 应用流程：备份原 MP4 → 推送临时文件 → 手机端 MD5 → chmod/mtime → 原子 `mv` → 媒体扫描。
+- 持久化备份目录：`~/Library/Application Support/adbclean/studio/backups/`（macOS），每批含 `manifest.tsv` 和 `restore.sh`。
+- 跨重启批量恢复：Studio 重启后仍可从备份列表按批次恢复；逐文件 MD5 校验，手机文件被外部修改时跳过。
+- 清除备份：应用完成后可清除本批备份，备份列表支持删除单个批次或全部；二次确认，删除不可逆。
+- 本地空间守卫：按选择体积估算所需空间，不足时拒绝开始；备份优先使用硬链接，应用成功后清理任务源文件和输出。
+- 界面：重做桌面/窄屏布局，压缩栏不再遮挡内容；骨架屏、缩略图淡入、无限滚动、体积筛选/排序、已选视图、相册视图。
+- 稳定性：视图请求竞态保护、按钮防重复提交、选择徽标原地更新、备份列表懒加载。
+- 安全：仅监听 loopback、随机 token、Host/Origin 校验、路径白名单、请求体上限。
+- 新增 `docs/COMPRESSION.md`；单元测试增至 78 个，覆盖压缩、uuid、备份目录、路径安全与 HTTP API。
+
+### Changed
+
+- 版本号升至 0.2.0；`pyproject.toml` 打包 `adbclean/web/*`。
+- 动态照片编号与时长过滤沿用 `live` 的规则，Studio 只展示验证过的配对。
+
+### Known limitations
+
+- 仅在 vivo 真机 / OriginOS 6 / Android 16 上完成真机验证。
+- HDR、10-bit、非 yuv420p/yuvj420p、4K 默认跳过；其他厂商的实况照片机制未验证。
+- 本地备份需要与待处理体积相当的磁盘空间，建议按批次操作。
+- Studio 的任务列表在重启后清空，但备份和 `restore.sh` 保留。
+
 ## [0.1.0] - 2026-10-21
 
 ### Added

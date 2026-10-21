@@ -187,6 +187,19 @@ def state_dir() -> Path:
     return path
 
 
+def data_dir() -> Path:
+    """Persistent per-user data (backups). Never a cache directory."""
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    path = base / "adbclean"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _atomic_write(path: Path, data: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name, suffix=".tmp")

@@ -149,6 +149,40 @@ content query --uri content://media/external/video/media --projection _data:dura
 
 这是统计口径问题，不是垃圾文件。工具的报告会单独列出这部分，帮助解释设置页的数字。
 
+## 实况照片压缩
+
+### 为什么不能直接重编码
+
+vivo 相册靠 MP4 末尾的 `vivoMediaExtInfo` uuid box 和 JPG 尾部的 livephoto ID 配对。ffmpeg 输出只保留音视频流，会丢掉这个 box。所以流程必须是：
+
+```text
+原 MP4 → ffmpeg 重编码 → 追加原 uuid box → 解码校验 → 替换
+```
+
+uuid box 按原字节复制，不解析、不重新序列化。
+
+### 为什么先备份到电脑
+
+- 手机 USB 写入比本机 SSD 慢，备份到手机还会占用正在释放的空间；
+- 备份到相册目录会被媒体库扫描，造成混淆；
+- 本机备份可以做 MD5 校验、硬链接、批量恢复。
+
+备份目录放在 `Application Support` 而不是 `Caches`，因为它是不可再生数据。每个批次写 `manifest.tsv` + `restore.sh`，Studio 重启后仍能恢复。
+
+### 空间与性能
+
+- 压缩时本机同时存在「拉取的源 MP4」和「压缩输出」，估算 `1.5 × 总体积 + 256 MB`。
+- 备份用硬链接（同一文件系统内零额外写入）；应用成功后删除任务源文件和输出。
+- 缩略图按需拉取、磁盘缓存；压缩与替换任务串行，避免同时操作 ADB。
+- HTTP 服务只监听 loopback，随机 token + Host/Origin 校验；路径只接受配对清单中的精确 key。
+
+### 失败处理
+
+- push 临时文件失败：原文件未动，删除临时文件。
+- `mv` 前校验失败：原文件未动。
+- `mv` 后校验失败：从备份推回并重新扫描。
+- 恢复时手机文件 MD5 既不是原文件也不是本工具的压缩版：跳过，避免覆盖外部修改。
+
 ## 报告
 
 - Markdown：便于 diff、粘贴、归档。
@@ -159,9 +193,10 @@ content query --uri content://media/external/video/media --projection _data:dura
 
 ## 测试策略
 
-- 纯函数单测：分类、白名单、保留策略、`du` 解析、MD5 解析、动态照片识别、报告渲染。
-- 不依赖真机的测试可以在 CI 跑。
-- 破坏性函数（`apply` / `delete`）通过脚本拼接测试和人工真机验证；CI 不连接设备。
+- 纯函数单测：分类、白名单、保留策略、`du` 解析、MD5 解析、动态照片识别、报告渲染、压缩命令构建、uuid box 解析、备份清单解析、路径安全。
+- 不依赖真机的测试可以在 CI 跑；ffmpeg 集成测试在缺少 ffmpeg 时自动 skip。
+- 破坏性函数（`apply` / `delete` / 替换 MP4）通过脚本拼接测试和人工真机验证；CI 不连接设备。
+- Studio 的 HTTP API 用本地 `ThreadingHTTPServer` 做 token / Host / Origin / 路径校验测试，不连接手机。
 
 ## 未来方向
 
