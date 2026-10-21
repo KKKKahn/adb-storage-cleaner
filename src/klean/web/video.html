@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  try {
+    var savedTheme = localStorage.getItem('klean-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      document.documentElement.dataset.theme = savedTheme;
+    }
+  } catch (error) {}
+</script>
+<meta name="klean-token" content="__KLEAN_TOKEN__">
+<title>Klean Video · 普通视频</title>
+<link rel="stylesheet" href="/static/style.css?v=0.4.0">
+<link rel="stylesheet" href="/static/video.css?v=0.4.0">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><span class="bolt"></span></div>
+    <div>
+      <h1>Klean Video</h1>
+      <p class="sub" id="device-line">正在读取视频…</p>
+    </div>
+  </div>
+  <div class="top-stats">
+    <div class="stat"><span id="video-count">–</span><label>普通视频</label></div>
+    <div class="stat"><span id="video-size">–</span><label>总大小</label></div>
+    <div class="stat"><span id="video-compressed">–</span><label>已压缩</label></div>
+  </div>
+  <div class="top-actions">
+    <button id="mode-btn" class="ghost" type="button">模式</button>
+    <button id="theme-btn" class="ghost theme-toggle" type="button" aria-label="切换主题" title="切换主题"></button>
+    <button id="refresh-btn" class="ghost" type="button">刷新</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar video-sidebar">
+    <div class="video-side-head">
+      <h2>视频库</h2>
+      <span id="video-side-summary" class="sub"></span>
+    </div>
+    <button id="all-videos" class="video-side-row active" type="button">
+      <span>全部视频</span><span id="all-count" class="video-side-count"></span>
+    </button>
+    <div class="video-side-title">按月份</div>
+    <div id="month-list" class="video-side-list"></div>
+    <div class="video-side-title">按相册</div>
+    <div id="album-list" class="video-side-list"></div>
+  </aside>
+
+  <main class="content" id="content">
+    <section id="video-job-panel" class="panel video-job hidden" aria-live="polite">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h3 id="video-job-title">任务</h3>
+          <span id="video-job-counts" class="job-counts"></span>
+        </div>
+        <span id="video-job-status" class="pill"></span>
+      </div>
+      <div class="progress"><div id="video-job-progress"></div></div>
+      <p id="video-job-message" class="sub"></p>
+      <div id="video-job-items" class="result-list"></div>
+      <div id="video-job-actions" class="panel-actions"></div>
+    </section>
+
+    <div class="content-top">
+      <div class="content-head">
+        <div>
+          <h2 id="view-title">全部视频</h2>
+          <p id="view-sub" class="sub">正在加载…</p>
+        </div>
+        <div class="view-actions">
+          <button id="select-scope-btn" class="ghost" type="button">全选当前</button>
+          <button id="selected-view-btn" class="ghost" type="button" disabled>已选 0</button>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <label class="inline-field">
+          <span>体积</span>
+          <select id="size-filter">
+            <option value="0">全部</option>
+            <option value="100000000">≥ 100 MB</option>
+            <option value="500000000">≥ 500 MB</option>
+            <option value="1000000000">≥ 1 GB</option>
+            <option value="2000000000">≥ 2 GB</option>
+          </select>
+        </label>
+        <label class="inline-field">
+          <span>排序</span>
+          <select id="sort-select">
+            <option value="time" selected>按时间</option>
+            <option value="size">按体积从大到小</option>
+          </select>
+        </label>
+        <button id="largest-btn" class="ghost" type="button">选最大的 50 个</button>
+        <span id="filter-hint" class="sub"></span>
+      </div>
+      <div id="notice" class="notice hidden"></div>
+    </div>
+
+    <div id="video-grid" class="video-grid"></div>
+    <div id="video-empty" class="empty hidden">
+      <div class="empty-art" aria-hidden="true"></div>
+      <p>这里还没有普通视频。</p>
+      <p class="sub">视频模式只显示 MediaStore 中的普通 MP4，不包含实况伴生 MP4。</p>
+    </div>
+    <div id="load-more-wrap" class="load-more hidden">
+      <button id="load-more" class="ghost" type="button">加载更多</button>
+    </div>
+  </main>
+</div>
+
+<div class="compress-bar">
+  <div class="selection-info">
+    <div><strong id="selected-count">0</strong> 个已选 · <span id="selected-size">0 B</span></div>
+    <div id="batch-hint" class="sub"></div>
+  </div>
+  <div class="compress-controls">
+    <label class="field">
+      <span>视频档位</span>
+      <select id="preset">
+        <option value="balanced" selected>推荐 · CRF20</option>
+        <option value="small">小体积 · CRF23</option>
+      </select>
+    </label>
+    <button id="compress-btn" class="primary" type="button" disabled>压缩所选</button>
+  </div>
+</div>
+
+<div id="video-preview" class="modal hidden" role="dialog" aria-modal="true" aria-label="压缩视频预览">
+  <div class="modal-card preview-card">
+    <div class="panel-head">
+      <h3 id="video-preview-title">预览</h3>
+      <button id="video-preview-close" class="ghost" type="button">关闭</button>
+    </div>
+    <video id="video-preview-video" controls playsinline></video>
+    <p id="video-preview-sub" class="sub"></p>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="/static/video.js?v=0.4.0"></script>
+</body>
+</html>

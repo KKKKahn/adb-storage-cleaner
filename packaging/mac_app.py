@@ -429,6 +429,8 @@ class Controller:
             )
         elif "媒体" in message:
             self.set_status("正在读取媒体信息…", "马上就好，请保持手机解锁。")
+        elif "视频" in message:
+            self.set_status("正在读取视频列表…", "视频较多时可能需要几秒。")
         elif "准备" in message:
             self.set_status("正在准备工作台…", "正在生成访问地址。")
 

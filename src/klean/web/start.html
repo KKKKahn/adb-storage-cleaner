@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  try {
+    var savedTheme = localStorage.getItem('klean-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      document.documentElement.dataset.theme = savedTheme;
+    }
+  } catch (error) {}
+</script>
+<meta name="klean-token" content="__KLEAN_TOKEN__">
+<title>Klean · 选择模式</title>
+<link rel="stylesheet" href="/static/style.css?v=0.4.0">
+<style>
+  body.start-page { display: block; overflow-y: auto; }
+  .start-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 34px; border-bottom: 1px solid var(--border);
+    background: var(--bg-glass); backdrop-filter: blur(16px);
+    position: sticky; top: 0; z-index: 30;
+  }
+  .start-brand { display: flex; align-items: center; gap: 12px; }
+  .start-brand h1 { font-size: 18px; margin: 0; }
+  .start-brand .sub { margin-top: 2px; }
+  .start-wrap { max-width: 1000px; margin: 0 auto; padding: 56px 28px 70px; }
+  .start-title { font-size: 28px; letter-spacing: -.5px; margin: 0 0 8px; }
+  .start-sub { color: var(--text-2); margin: 0 0 34px; font-size: 14px; }
+  .mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .mode-card {
+    display: block; color: inherit; text-decoration: none;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 26px;
+    box-shadow: var(--shadow-sm);
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .mode-card:hover { transform: translateY(-3px); border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+  .mode-icon {
+    width: 50px; height: 50px; border-radius: 15px; display: grid; place-items: center;
+    background: var(--surface-2); color: var(--violet); margin-bottom: 18px;
+  }
+  .mode-card.video .mode-icon { color: var(--accent); }
+  .mode-card h2 { margin: 0; font-size: 21px; letter-spacing: -.2px; }
+  .mode-card .mode-desc { margin: 8px 0 18px; color: var(--text-2); font-size: 13px; line-height: 1.65; min-height: 42px; }
+  .mode-stats { display: flex; gap: 18px; margin-bottom: 20px; }
+  .mode-stat strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .mode-stat span { color: var(--text-3); font-size: 11px; }
+  .mode-enter {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent); font-weight: 600; font-size: 13px;
+  }
+  .mode-card.video .mode-enter { color: var(--violet); }
+  .start-note {
+    margin-top: 26px; padding: 16px 18px; border-radius: 14px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-2); font-size: 12.5px; line-height: 1.7;
+  }
+  .start-foot { margin-top: 24px; color: var(--text-3); font-size: 11px; text-align: center; }
+  @media (max-width: 760px) {
+    .start-wrap { padding: 32px 18px 50px; }
+    .mode-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body class="start-page">
+<header class="start-top">
+  <div class="start-brand">
+    <div class="logo" aria-hidden="true"><span class="bolt"></span></div>
+    <div>
+      <h1>Klean</h1>
+      <p class="sub">Android 存储清理</p>
+    </div>
+  </div>
+  <button id="theme-btn" class="ghost theme-toggle" type="button" aria-label="切换主题" title="切换主题"></button>
+</header>
+<main class="start-wrap">
+  <h2 class="start-title">选择要处理的类型</h2>
+  <p class="start-sub">实况照片和普通视频是两条完全独立的赛道，列表、选择、历史和备份互不影响。</p>
+  <div class="mode-grid">
+    <a id="live-link" class="mode-card live" href="#">
+      <div class="mode-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+          <circle cx="8.5" cy="9" r="1.4"></circle>
+          <path d="M21 15l-5-5L6 20"></path>
+        </svg>
+      </div>
+      <h2>实况照片</h2>
+      <p class="mode-desc">按日期/相册浏览，压缩伴生 MP4；定格 JPG 永不修改。</p>
+      <div class="mode-stats">
+        <div class="mode-stat"><strong id="live-count">—</strong><span>实况照片</span></div>
+        <div class="mode-stat"><strong id="live-size">—</strong><span>伴生 MP4</span></div>
+      </div>
+      <span class="mode-enter">进入实况 →</span>
+    </a>
+    <a id="video-link" class="mode-card video" href="#">
+      <div class="mode-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="27" height="27" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="13" height="14" rx="3"></rect>
+          <path d="M16 10l5-3v10l-5-3"></path>
+        </svg>
+      </div>
+      <h2>普通视频</h2>
+      <p class="mode-desc">仅普通 MP4 视频；独立压缩、独立备份，按总大小分批更稳。</p>
+      <div class="mode-stats">
+        <div class="mode-stat"><strong id="video-count">—</strong><span>普通视频</span></div>
+        <div class="mode-stat"><strong id="video-size">—</strong><span>总大小</span></div>
+      </div>
+      <span class="mode-enter">进入视频 →</span>
+    </a>
+  </div>
+  <div class="start-note">
+    普通视频默认保留原片备份，建议每批 5–8 GB；实况照片仍按原有流程处理。两条赛道的任务不会混在一起。
+  </div>
+  <p class="start-foot">所有处理都在本机完成 · 不上传任何文件</p>
+</main>
+<script>
+  const TOKEN = document.querySelector('meta[name="klean-token"]').content;
+  const SUN_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>';
+  const MOON_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>';
+  function formatBytes(value) {
+    value = Number(value) || 0;
+    if (value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let index = 0;
+    while (value >= 1000 && index < units.length - 1) { value /= 1000; index += 1; }
+    return (index === 0 ? value.toFixed(0) : value.toFixed(2)) + ' ' + units[index];
+  }
+  function effectiveTheme() {
+    return document.documentElement.dataset.theme ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  }
+  function syncTheme() {
+    const button = document.getElementById('theme-btn');
+    const dark = effectiveTheme() === 'dark';
+    button.innerHTML = dark ? MOON_ICON : SUN_ICON;
+    const label = dark ? '切换到浅色主题' : '切换到深色主题';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+  }
+  function applyTheme(theme, persist) {
+    document.documentElement.dataset.theme = theme;
+    if (persist) { try { localStorage.setItem('klean-theme', theme); } catch (error) {} }
+    syncTheme();
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_theme) {
+      const result = window.pywebview.api.set_theme(theme);
+      if (result && result.catch) result.catch(function () {});
+    }
+  }
+  document.getElementById('theme-btn').addEventListener('click', function () {
+    applyTheme(effectiveTheme() === 'dark' ? 'light' : 'dark', true);
+  });
+  syncTheme();
+  if (window.matchMedia('(prefers-color-scheme: dark)').addEventListener) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+      if (!document.documentElement.dataset.theme) syncTheme();
+    });
+  }
+  async function api(path) {
+    const response = await fetch(path, { headers: { 'X-Klean-Token': TOKEN } });
+    if (!response.ok) throw new Error('请求失败 (' + response.status + ')');
+    return response.json();
+  }
+  function setModeLinks() {
+    const suffix = '?token=' + encodeURIComponent(TOKEN);
+    document.getElementById('live-link').href = '/studio' + suffix;
+    document.getElementById('video-link').href = '/videos' + suffix;
+  }
+  setModeLinks();
+  api('/api/summary').then(function (data) {
+    document.getElementById('live-count').textContent = (data.totals.pairs || 0).toLocaleString('zh-CN');
+    document.getElementById('live-size').textContent = formatBytes(data.totals.bytes);
+  }).catch(function () {});
+  api('/api/video/summary').then(function (data) {
+    document.getElementById('video-count').textContent = (data.count || 0).toLocaleString('zh-CN');
+    document.getElementById('video-size').textContent = formatBytes(data.bytes);
+  }).catch(function () {});
+</script>
+</body>
+</html>

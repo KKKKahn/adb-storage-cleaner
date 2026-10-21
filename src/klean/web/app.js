@@ -2066,6 +2066,9 @@ function switchSideTab(tab) {
 }
 
 function bindEvents() {
+  $('mode-btn').addEventListener('click', function () {
+    window.location.href = '/?token=' + encodeURIComponent(TOKEN);
+  });
   $('theme-btn').addEventListener('click', toggleTheme);
   $('compress-btn').addEventListener('click', compressSelected);
   $('selected-view-btn').addEventListener('click', showSelected);

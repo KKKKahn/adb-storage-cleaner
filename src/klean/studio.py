@@ -48,13 +48,28 @@ from .compress import (
 from .live import LivePair, find_pairs, load_durations, sh_quote
 from .scan import Scan, load_latest, save_scan, scan_device
 from .util import data_dir, human, mask_serial, now_iso, read_json, stamp, state_dir, write_json
+from .video import (
+    VIDEO_BATCH_SUGGESTION,
+    VIDEO_PRESETS,
+    VIDEO_TIMEOUT,
+    VIDEO_WORKERS,
+    VideoItem,
+    albums_for,
+    compress_regular_video,
+    dates_for,
+    load_videos,
+    months_for,
+)
 
 WEB_DIR = Path(__file__).resolve().with_name("web")
 STUDIO_DIR = state_dir() / "studio"
 JOBS_DIR = STUDIO_DIR / "jobs"
 THUMBS_DIR = STUDIO_DIR / "thumbs"
+VIDEO_THUMBS_DIR = STUDIO_DIR / "video-thumbs"
 BACKUPS_DIR = data_dir() / "studio" / "backups"
+VIDEO_BACKUPS_DIR = data_dir() / "studio" / "video-backups"
 HISTORY_PATH = data_dir() / "studio" / "history.json"
+VIDEO_HISTORY_PATH = data_dir() / "studio" / "video-history.json"
 LEGACY_BACKUPS_DIR = STUDIO_DIR / "backups"
 MAX_BODY = 1024 * 1024
 BATCH_SUGGESTION = 200
@@ -147,6 +162,10 @@ class StudioState:
     android: str = ""
     jobs: Dict[str, Job] = field(default_factory=dict)
     history: Dict[str, Dict] = field(default_factory=dict)
+    videos: List[VideoItem] = field(default_factory=list)
+    video_by_path: Dict[str, VideoItem] = field(default_factory=dict)
+    video_by_id: Dict[str, VideoItem] = field(default_factory=dict)
+    video_history: Dict[str, Dict] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock)
     adb_lock: threading.Lock = field(default_factory=threading.Lock)
     thumb_sem: threading.BoundedSemaphore = field(
@@ -178,6 +197,28 @@ class StudioState:
 
     def pairs_for_album(self, album: str) -> List[LivePair]:
         return [pair for pair in self.pairs if _album_of(pair.mp4) == album]
+
+    def video_dates(self) -> List[Dict]:
+        return dates_for(self.videos)
+
+    def video_months(self) -> List[Dict]:
+        return months_for(self.videos)
+
+    def video_albums(self) -> List[Dict]:
+        return albums_for(self.videos)
+
+    def videos_for_date(self, date: str) -> List[VideoItem]:
+        return [video for video in self.videos if video.date == date]
+
+    def videos_for_month(self, month: str) -> List[VideoItem]:
+        return [video for video in self.videos if video.month == month]
+
+    def videos_for_album(self, album: str) -> List[VideoItem]:
+        return [video for video in self.videos if video.album == album]
+
+    def video_batch_suggestion(self) -> int:
+        free = shutil.disk_usage(str(state_dir())).free
+        return min(VIDEO_BATCH_SUGGESTION, max(1_000_000_000, int(free * 0.25)))
 
     def albums(self) -> List[Dict]:
         buckets: Dict[str, List[LivePair]] = {}
@@ -302,6 +343,34 @@ def _backup_file(relative: str) -> Optional[Path]:
     return candidate
 
 
+def _video_backup_file(relative: str) -> Optional[Path]:
+    if not relative:
+        return None
+    base = VIDEO_BACKUPS_DIR.resolve()
+    candidate = (base / relative).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _new_video_backup_dir() -> Path:
+    VIDEO_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    base = VIDEO_BACKUPS_DIR / stamp()
+    path = base
+    counter = 1
+    while path.exists():
+        counter += 1
+        path = VIDEO_BACKUPS_DIR / f"{base.name}-{counter}"
+    path.mkdir(parents=True)
+    return path
+
+
+def _rel_to_video_backup(path: Path) -> str:
+    return path.relative_to(VIDEO_BACKUPS_DIR).as_posix()
+
+
 def _local_md5(path: Path) -> str:
     digest = hashlib.md5()
     with open(path, "rb") as handle:
@@ -383,6 +452,81 @@ def _history_skip_reason(entry: Optional[Dict], recompress: bool, preset) -> str
     if old_crf is not None and (new_crf is None or int(new_crf) <= int(old_crf)):
         return f"已压缩过（{old_label}），当前档位不是更深压缩"
     return ""
+
+
+def _load_video_history() -> Dict[str, Dict]:
+    payload = read_json(VIDEO_HISTORY_PATH, {})
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(path): entry
+        for path, entry in payload.items()
+        if isinstance(entry, dict) and path.startswith("/sdcard/")
+    }
+
+
+def _save_video_history(history: Dict[str, Dict]) -> None:
+    write_json(VIDEO_HISTORY_PATH, history)
+
+
+def _video_history_entry(state: StudioState, video: VideoItem) -> Optional[Dict]:
+    entry = state.video_history.get(video.path)
+    if not entry:
+        return None
+    if int(entry.get("compressed_size", -1)) != video.size:
+        return None
+    return entry
+
+
+def _video_payload(video: VideoItem, state: StudioState) -> Dict:
+    entry = _video_history_entry(state, video)
+    return {
+        "id": video.media_id,
+        "path": video.path,
+        "size": video.size,
+        "duration_ms": video.duration_ms,
+        "width": video.width,
+        "height": video.height,
+        "date": video.date,
+        "time": video.time,
+        "album": video.album,
+        "compressed": bool(entry),
+        "history_crf": entry.get("crf_used") if entry else None,
+        "history_size": entry.get("compressed_size") if entry else None,
+    }
+
+
+def _video_thumb_path(video: VideoItem) -> Path:
+    return VIDEO_THUMBS_DIR / f"{video.media_id}-{video.size}.jpg"
+
+
+def _make_video_thumbnail(state: StudioState, video: VideoItem) -> Optional[Path]:
+    target = _video_thumb_path(video)
+    if target.exists() and target.stat().st_size > 0:
+        return target
+    VIDEO_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+    uri = f"content://media/external/video/media/{video.media_id}/thumbnail"
+    with state.thumb_sem:
+        if target.exists() and target.stat().st_size > 0:
+            return target
+        temp = target.with_name(f".{target.name}.tmp")
+        try:
+            result = state.adb.run(
+                "exec-out", "content", "read", "--uri", uri, timeout=90
+            )
+            data = result.stdout
+            if result.returncode != 0 or not data.startswith(b"\xff\xd8"):
+                return None
+            temp.write_bytes(data)
+            os.replace(temp, target)
+            return target
+        except (OSError, ADBError):
+            return None
+        finally:
+            with contextlib.suppress(OSError):
+                if temp.exists():
+                    temp.unlink()
+
 
 
 def _read_backup_session(session: Path) -> Optional[Dict]:
@@ -1030,6 +1174,374 @@ def _apply_job(state: StudioState, job: Job, source_job: Job) -> None:
         with contextlib.suppress(OSError):
             backup_dir.rmdir()
 
+
+def _video_compress_one(
+    state: StudioState,
+    job: Job,
+    item: ItemResult,
+    preset,
+    src_dir: Path,
+    out_dir: Path,
+    directory: Path,
+) -> None:
+    started = time.monotonic()
+    if job.cancel_requested:
+        with state.lock:
+            item.status = "skipped"
+            item.reason = "用户已停止任务"
+            item.progress = 1.0
+            job.done += 1
+        return
+    with state.lock:
+        if item.status == "skipped":
+            item.progress = 1.0
+            job.done += 1
+            return
+        item.status = "running"
+        item.progress = max(item.progress, 0.02)
+        item.phase = "拉取中"
+    try:
+        video = state.video_by_path.get(item.mp4)
+        if video is None:
+            raise BadRequest("不在视频清单中")
+        free = shutil.disk_usage(str(state_dir())).free
+        needed = estimate_local_need(video.size)
+        if free < needed:
+            raise CompressError(
+                f"本机空间不足：需要约 {human(needed)}，当前可用 {human(free)}；请缩小批次"
+            )
+        local_src = src_dir / (_safe_sha1(video.path)[:12] + "-" + video.path.rsplit("/", 1)[-1])
+        local_out = out_dir / (_safe_sha1(video.path)[:12] + "-" + video.path.rsplit("/", 1)[-1])
+        with state.adb_lock:
+            probe = state.adb.sh(
+                f"stat -c '%s %Y' {sh_quote(video.path)}; "
+                f"[ -f {sh_quote(video.path)} ] && echo FILE_OK",
+                check=False,
+            )
+            lines = [line.strip() for line in probe.splitlines() if line.strip()]
+            if "FILE_OK" not in lines:
+                raise CompressError("手机上的视频不存在")
+            stat_line = next((line for line in lines if line != "FILE_OK"), "")
+            parts = stat_line.split()
+            if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                raise CompressError("无法读取视频信息")
+            remote_size = int(parts[0])
+            remote_mtime = int(parts[1])
+            if not state.adb.pull(video.path, str(local_src), timeout=VIDEO_TIMEOUT):
+                raise CompressError("adb pull 失败")
+        local_size = local_src.stat().st_size if local_src.exists() else 0
+        if not local_size:
+            raise CompressError("adb pull 失败")
+        if remote_size != local_size:
+            raise CompressError(f"拉取大小不一致 {local_size} != {remote_size}")
+        original_md5 = _local_md5(local_src)
+        _set_item_progress(state, item, 0.10, "编码中")
+        result = compress_regular_video(
+            str(local_src),
+            str(local_out),
+            preset,
+            ffmpeg=state.ffmpeg,
+            ffprobe=state.ffprobe,
+            on_progress=lambda fraction: _set_item_progress(
+                state, item, 0.10 + 0.84 * fraction
+            ),
+        )
+        _set_item_progress(state, item, 0.94, "校验中")
+        compressed_md5 = _local_md5(local_out)
+        with state.lock:
+            item.original_size = result.original_size
+            item.compressed_size = result.compressed_size
+            item.original_md5 = original_md5
+            item.compressed_md5 = compressed_md5
+            item.output = local_out.relative_to(directory).as_posix()
+            item.source = local_src.relative_to(directory).as_posix()
+            item.mtime = remote_mtime
+            item.duration_ms = video.duration_ms
+            item.crf_used = result.crf
+            item.speed_used = result.speed_used
+            item.status = "ready"
+            item.progress = 1.0
+            item.phase = ""
+            item.reason = "音频已重编码" if result.audio_reencoded else ""
+    except (HdrUnsupported, UnsupportedFormat, NoBenefit) as exc:
+        with state.lock:
+            item.status = "skipped"
+            item.reason = str(exc)
+            item.progress = 1.0
+    except (BadRequest, CompressError, ADBError, OSError, ValueError) as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = str(exc)
+            item.progress = 1.0
+    except Exception as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = f"{type(exc).__name__}: {exc}"
+            item.progress = 1.0
+    finally:
+        with state.lock:
+            item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            job.done += 1
+
+
+def _video_compress_job(state: StudioState, job: Job, preset) -> None:
+    directory = _job_dir(job)
+    src_dir = directory / "src"
+    out_dir = directory / "out"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if not job.items:
+        return
+    workers = max(1, min(VIDEO_WORKERS, len(job.items)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(
+                _video_compress_one,
+                state,
+                job,
+                item,
+                preset,
+                src_dir,
+                out_dir,
+                directory,
+            )
+            for item in job.items
+        ]
+        for future in as_completed(futures):
+            with contextlib.suppress(Exception):
+                future.result()
+    if job.cancel_requested:
+        job.message = "已停止；已完成的部分仍可应用"
+
+
+def _video_apply_one(
+    state: StudioState,
+    job: Job,
+    source_job: Job,
+    item: ItemResult,
+    backup_dir: Path,
+    manifest_rows: List[List[str]],
+    restore_rows: List[Tuple[str, str, int]],
+) -> None:
+    started = time.monotonic()
+    with state.lock:
+        item.status = "running"
+        item.progress = max(item.progress, 0.02)
+        item.phase = "校验中"
+    try:
+        src = state.find_item(source_job.id, item.mp4)
+        if src is None or src.status != "ready":
+            raise CompressError("压缩结果不可用，请重新压缩")
+        video = state.video_by_path.get(item.mp4)
+        if video is None:
+            raise CompressError("不在视频清单中")
+        output = _job_file(state, source_job.id, src.output)
+        if output is None or not output.exists():
+            raise CompressError("本地压缩文件不存在")
+        if _local_md5(output) != src.compressed_md5:
+            raise CompressError("本地压缩文件 MD5 已变化，请重新压缩")
+        probe = state.adb.sh(
+            f"md5sum {sh_quote(video.path)}; "
+            f"stat -c '%Y %a' {sh_quote(video.path)}; "
+            f"[ -f {sh_quote(video.path)} ] && echo FILE_OK",
+            check=False,
+        )
+        lines = [line.strip() for line in probe.splitlines() if line.strip()]
+        if "FILE_OK" not in lines:
+            raise CompressError("手机上的视频不存在")
+        hash_line = next(
+            (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)), ""
+        )
+        stat_line = next(
+            (line for line in lines if re.fullmatch(r"\d+\s+\d+", line)), ""
+        )
+        if not hash_line or not stat_line:
+            raise CompressError("无法读取手机视频信息")
+        remote_md5 = hash_line.split()[0].lower()
+        if remote_md5 != src.original_md5:
+            raise CompressError("手机视频已变化，已跳过")
+        stat_parts = stat_line.split()
+        mtime = int(stat_parts[0]) or src.mtime
+        # sdcard FUSE may report 770 but forces 660 after push; use the same
+        # media-file mode as the live-photo pipeline instead of preserving it.
+        mode = "660"
+        _set_item_progress(state, item, 0.12, "备份中")
+        source_local = _job_file(state, source_job.id, src.source)
+        if source_local is None or not source_local.exists():
+            raise CompressError("本地原始视频副本丢失，已跳过")
+        target = _backup_target(backup_dir, video.path)
+        _backup_verified(source_local, target, src.original_md5)
+        item.backup = _rel_to_video_backup(target)
+        _set_item_progress(state, item, 0.25, "传输中")
+        try:
+            _push_replace(
+                state, output, video.path, src.compressed_md5, mtime, mode=mode
+            )
+            _set_item_progress(state, item, 0.92, "校验中")
+            with contextlib.suppress(OSError):
+                source_local.unlink()
+            with contextlib.suppress(OSError):
+                output.unlink()
+        except Exception:
+            try:
+                _restore_one(state, target, video.path, src.original_md5, mtime)
+            except Exception as restore_error:
+                raise CompressError(
+                    f"替换失败且自动恢复失败: {restore_error}"
+                ) from restore_error
+            raise
+        with state.lock:
+            state.update_scan_size(video.path, src.compressed_size)
+            video.size = src.compressed_size
+            item.original_size = src.original_size
+            item.compressed_size = src.compressed_size
+            item.original_md5 = src.original_md5
+            item.compressed_md5 = src.compressed_md5
+            item.mtime = mtime
+            item.duration_ms = video.duration_ms
+            item.crf_used = src.crf_used
+            item.speed_used = src.speed_used
+            item.status = "applied"
+            item.progress = 1.0
+            item.phase = ""
+            src.status = "applied"
+            src.backup = item.backup
+            manifest_rows.append(
+                [
+                    video.path,
+                    "-",
+                    src.original_size,
+                    src.compressed_size,
+                    src.original_md5,
+                    src.compressed_md5,
+                    mtime,
+                ]
+            )
+            restore_rows.append(
+                (target.relative_to(backup_dir).as_posix(), video.path, mtime)
+            )
+            state.video_history[video.path] = {
+                "original_md5": src.original_md5,
+                "compressed_md5": src.compressed_md5,
+                "original_size": src.original_size,
+                "compressed_size": src.compressed_size,
+                "crf_used": src.crf_used,
+                "speed_used": src.speed_used,
+                "applied_at": now_iso(),
+                "backup": item.backup,
+            }
+    except (CompressError, ADBError, OSError, ValueError) as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = str(exc)
+            item.progress = 1.0
+    except Exception as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = f"{type(exc).__name__}: {exc}"
+            item.progress = 1.0
+    finally:
+        with state.lock:
+            item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            job.done += 1
+
+
+def _video_apply_job(state: StudioState, job: Job, source_job: Job) -> None:
+    backup_dir = _new_video_backup_dir()
+    manifest_rows: List[List[str]] = []
+    restore_rows: List[Tuple[str, str, int]] = []
+    if job.items:
+        workers = max(1, min(VIDEO_WORKERS, len(job.items)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(
+                    _video_apply_one,
+                    state,
+                    job,
+                    source_job,
+                    item,
+                    backup_dir,
+                    manifest_rows,
+                    restore_rows,
+                )
+                for item in job.items
+            ]
+            for future in as_completed(futures):
+                with contextlib.suppress(Exception):
+                    future.result()
+    if manifest_rows:
+        _write_backup_manifest(backup_dir, manifest_rows)
+        _write_restore_script(backup_dir, restore_rows)
+        save_scan(state.scan)
+        with state.lock:
+            history_snapshot = dict(state.video_history)
+        _save_video_history(history_snapshot)
+        job.message = f"已应用 {len(manifest_rows)} 个视频；备份目录 {backup_dir}"
+    else:
+        with contextlib.suppress(OSError):
+            backup_dir.rmdir()
+
+
+def _video_restore_job(state: StudioState, job: Job, source_job: Job) -> None:
+    for item in job.items:
+        with state.lock:
+            item.status = "running"
+            item.progress = 0.1
+            item.phase = "恢复中"
+        try:
+            src = state.find_item(source_job.id, item.mp4)
+            if src is None or not src.backup:
+                raise CompressError("找不到该视频的备份记录")
+            backup_path = _video_backup_file(src.backup)
+            if backup_path is None or not backup_path.exists():
+                raise CompressError("备份文件不在视频备份目录内或已丢失")
+            video = state.video_by_path.get(item.mp4)
+            if video is None:
+                raise CompressError("不在视频清单中")
+            probe = state.adb.sh(
+                f"md5sum {sh_quote(video.path)}; [ -f {sh_quote(video.path)} ] && echo FILE_OK",
+                check=False,
+            )
+            lines = [line.strip() for line in probe.splitlines() if line.strip()]
+            hash_line = next(
+                (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)), ""
+            )
+            if "FILE_OK" not in lines or not hash_line:
+                raise CompressError("手机视频不存在")
+            if hash_line.split()[0].lower() != src.compressed_md5:
+                raise CompressError("手机视频已被外部修改，未恢复")
+            _restore_one(state, backup_path, video.path, src.original_md5, src.mtime)
+            with state.lock:
+                state.update_scan_size(video.path, src.original_size)
+                video.size = src.original_size
+                item.original_size = src.original_size
+                item.compressed_size = src.compressed_size
+                item.backup = src.backup
+                item.mtime = src.mtime
+                item.status = "restored"
+                item.progress = 1.0
+                item.phase = ""
+                src.status = "restored"
+                state.video_history.pop(video.path, None)
+        except (CompressError, ADBError, OSError, ValueError) as exc:
+            with state.lock:
+                item.status = "error"
+                item.reason = str(exc)
+                item.progress = 1.0
+        except Exception as exc:
+            with state.lock:
+                item.status = "error"
+                item.reason = f"{type(exc).__name__}: {exc}"
+                item.progress = 1.0
+        finally:
+            with state.lock:
+                job.done += 1
+    save_scan(state.scan)
+    with state.lock:
+        history_snapshot = dict(state.video_history)
+    _save_video_history(history_snapshot)
+
+
 def _restore_job(state: StudioState, job: Job, source_job: Job) -> None:
     for item in job.items:
         with state.lock:
@@ -1553,13 +2065,30 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             self._send_bytes(b"", "image/x-icon", 204)
             return
-        if path in ("/", "/index.html"):
+        if path in ("/", "/start"):
             if not self._token_ok():
                 self._error(403, "缺少或错误的访问 token")
                 return
-            self._serve_index()
+            self._serve_page("start.html")
             return
-        if path in ("/static/app.js", "/static/style.css"):
+        if path in ("/studio", "/index.html"):
+            if not self._token_ok():
+                self._error(403, "缺少或错误的访问 token")
+                return
+            self._serve_page("index.html")
+            return
+        if path == "/videos":
+            if not self._token_ok():
+                self._error(403, "缺少或错误的访问 token")
+                return
+            self._serve_page("video.html")
+            return
+        if path in (
+            "/static/app.js",
+            "/static/style.css",
+            "/static/video.js",
+            "/static/video.css",
+        ):
             self._serve_static(path.rsplit("/", 1)[-1])
             return
         if path.startswith("/api/"):
@@ -1576,7 +2105,10 @@ class StudioHandler(BaseHTTPRequestHandler):
         self._error(404, "未找到")
 
     def _serve_index(self) -> None:
-        index = WEB_DIR / "index.html"
+        self._serve_page("index.html")
+
+    def _serve_page(self, name: str) -> None:
+        index = WEB_DIR / name
         if not index.exists():
             self._error(500, "前端资源缺失")
             return
@@ -1588,7 +2120,9 @@ class StudioHandler(BaseHTTPRequestHandler):
     def _serve_static(self, name: str) -> None:
         content_types = {
             "app.js": "application/javascript; charset=utf-8",
+            "video.js": "application/javascript; charset=utf-8",
             "style.css": "text/css; charset=utf-8",
+            "video.css": "text/css; charset=utf-8",
         }
         path = WEB_DIR / name
         if not path.exists():
@@ -1604,6 +2138,69 @@ class StudioHandler(BaseHTTPRequestHandler):
         query = self._query()
         if path == "/api/summary":
             self._send_json(self._summary())
+            return
+        if path == "/api/video/summary":
+            with self.state.lock:
+                videos = list(self.state.videos)
+                compressed = sum(
+                    1 for video in videos if _video_history_entry(self.state, video)
+                )
+                payload = {
+                    "count": len(videos),
+                    "bytes": sum(video.size for video in videos),
+                    "compressed_count": compressed,
+                    "free_bytes": shutil.disk_usage(str(state_dir())).free,
+                    "suggested_batch_bytes": self.state.video_batch_suggestion(),
+                    "device": {
+                        "model": self.state.model,
+                        "android": self.state.android,
+                    },
+                    "scanned_at": self.state.scan.scanned_at,
+                }
+            self._send_json(payload)
+            return
+        if path == "/api/video/dates":
+            with self.state.lock:
+                self._send_json(
+                    {
+                        "dates": dates_for(self.state.videos),
+                        "months": months_for(self.state.videos),
+                        "albums": albums_for(self.state.videos),
+                    }
+                )
+            return
+        if path == "/api/video/list":
+            date = (query.get("date") or [""])[0]
+            month = (query.get("month") or [""])[0]
+            album = (query.get("album") or [""])[0]
+            with self.state.lock:
+                if month:
+                    if not re.fullmatch(r"\d{4}-\d{2}", month):
+                        raise BadRequest("month 格式必须是 YYYY-MM")
+                    videos = self.state.videos_for_month(month)
+                elif album:
+                    if album not in {row["album"] for row in self.state.video_albums()}:
+                        raise BadRequest("未知视频相册")
+                    videos = self.state.videos_for_album(album)
+                elif date:
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+                        raise BadRequest("date 格式必须是 YYYY-MM-DD")
+                    videos = self.state.videos_for_date(date)
+                else:
+                    videos = list(self.state.videos)
+                payload = [_video_payload(video, self.state) for video in videos]
+            self._send_json({"videos": payload})
+            return
+        if path == "/api/video/thumb":
+            remote = (query.get("path") or [""])[0]
+            video = self.state.video_by_path.get(remote)
+            if video is None:
+                raise BadRequest("不在视频清单中")
+            thumb = _make_video_thumbnail(self.state, video)
+            if thumb is None:
+                self._error(404, "视频缩略图不可用")
+                return
+            self._send_file(thumb, "image/jpeg", "private, max-age=86400")
             return
         if path == "/api/dates":
             with self.state.lock:
@@ -1810,6 +2407,15 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/api/apply":
             self._post_apply(payload)
             return
+        if path == "/api/video/compress":
+            self._post_video_compress(payload)
+            return
+        if path == "/api/video/apply":
+            self._post_video_apply(payload)
+            return
+        if path == "/api/video/restore":
+            self._post_video_restore(payload)
+            return
         if path == "/api/restore":
             self._post_restore(payload)
             return
@@ -1933,6 +2539,128 @@ class StudioHandler(BaseHTTPRequestHandler):
         )
         self._send_json({"job_id": job.id}, 202)
 
+    def _post_video_compress(self, payload: Dict) -> None:
+        state = self.state
+        if not (shutil.which(state.ffmpeg) or os.path.exists(state.ffmpeg)):
+            raise BadRequest("找不到 ffmpeg，无法压缩")
+        if not (shutil.which(state.ffprobe) or os.path.exists(state.ffprobe)):
+            raise BadRequest("找不到 ffprobe，无法压缩")
+        paths = _string_list(payload)
+        if not paths:
+            raise BadRequest("没有选择视频")
+        preset = VIDEO_PRESETS.get(str(payload.get("preset", "balanced")))
+        if preset is None:
+            raise BadRequest("未知的视频压缩档位")
+        items = []
+        total_bytes = 0
+        for remote in paths:
+            video = state.video_by_path.get(remote)
+            if video is None:
+                raise BadRequest(f"不在视频清单中: {remote}")
+            item = ItemResult(video.path, "", video.date, video.time)
+            entry = _video_history_entry(state, video)
+            if entry:
+                item.status = "skipped"
+                item.progress = 1.0
+                crf = entry.get("crf_used")
+                label = f"CRF{crf}" if crf is not None else "档位未知"
+                item.reason = f"已压缩过（{label}）；视频赛道暂不支持重复压缩"
+            else:
+                total_bytes += video.size
+            items.append(item)
+        if not any(item.status != "skipped" for item in items):
+            raise BadRequest("所选视频都已压缩过")
+        free = shutil.disk_usage(str(state_dir())).free
+        needed = estimate_local_need(total_bytes)
+        warning = ""
+        if needed > free:
+            warning = (
+                f"本机空间不足：本批约需 {human(needed)}，当前可用 {human(free)}。"
+                "会先处理能容纳的视频，其余标记为空间不足；建议按总大小分批。"
+            )
+        job = state.new_job(
+            "video-compress",
+            items,
+            f"{preset.label} · 视频 · {VIDEO_WORKERS} 并发",
+        )
+        _start_thread(
+            state,
+            job,
+            lambda: _video_compress_job(state, job, preset),
+        )
+        self._send_json(
+            {
+                "job_id": job.id,
+                "warning": warning,
+                "suggested_batch_bytes": state.video_batch_suggestion(),
+            },
+            202,
+        )
+
+    def _post_video_apply(self, payload: Dict) -> None:
+        state = self.state
+        source_id = str(payload.get("job_id", ""))
+        source_job = state.jobs.get(source_id)
+        if source_job is None or source_job.kind != "video-compress":
+            raise BadRequest("job_id 必须是视频压缩任务")
+        if source_job.status == "running":
+            raise Busy("压缩任务还在运行")
+        requested = _string_list(payload)
+        ready = [item for item in source_job.items if item.status == "ready"]
+        if requested:
+            ready_map = {item.mp4: item for item in ready}
+            chosen = []
+            for remote in requested:
+                item = ready_map.get(remote)
+                if item is None:
+                    raise BadRequest(f"该视频没有可用的压缩结果: {remote}")
+                chosen.append(item)
+        else:
+            chosen = ready
+        if not chosen:
+            raise BadRequest("没有可应用的视频")
+        items = [
+            ItemResult(item.mp4, "", item.date, item.time) for item in chosen
+        ]
+        job = state.new_job("video-apply", items)
+        _start_thread(
+            state,
+            job,
+            lambda: _video_apply_job(state, job, source_job),
+        )
+        self._send_json({"job_id": job.id}, 202)
+
+    def _post_video_restore(self, payload: Dict) -> None:
+        state = self.state
+        source_id = str(payload.get("job_id", ""))
+        source_job = state.jobs.get(source_id)
+        if source_job is None or source_job.kind != "video-compress":
+            raise BadRequest("job_id 必须是视频压缩任务")
+        requested = _string_list(payload)
+        applied = [item for item in source_job.items if item.status == "applied"]
+        if requested:
+            applied_map = {item.mp4: item for item in applied}
+            chosen = []
+            for remote in requested:
+                item = applied_map.get(remote)
+                if item is None:
+                    raise BadRequest(f"该视频没有可恢复的备份: {remote}")
+                chosen.append(item)
+        else:
+            chosen = applied
+        if not chosen:
+            raise BadRequest("没有可恢复的视频")
+        items = [
+            ItemResult(item.mp4, "", item.date, item.time) for item in chosen
+        ]
+        job = state.new_job("video-restore", items)
+        _start_thread(
+            state,
+            job,
+            lambda: _video_restore_job(state, job, source_job),
+        )
+        self._send_json({"job_id": job.id}, 202)
+
     def _post_restore(self, payload: Dict) -> None:
         state = self.state
         source_id = str(payload.get("job_id", ""))
@@ -1970,7 +2698,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
         if job.status != "running":
             raise BadRequest("任务已经结束")
-        if job.kind != "compress":
+        if job.kind not in ("compress", "video-compress"):
             raise BadRequest("只有压缩任务支持中途停止")
         job.cancel_requested = True
         job.message = "正在停止，等待当前文件结束…"
@@ -2100,6 +2828,16 @@ def prepare_studio(
     )
     if not durations:
         print("[!] MediaStore 时长不可用；界面只显示命名匹配且未校验时长的文件。")
+    notify("正在读取视频列表…")
+    try:
+        videos = load_videos(
+            adb,
+            live_paths={pair.mp4 for pair in pairs},
+            size_map=scan.size_map(),
+        )
+    except (ADBError, OSError) as exc:
+        print(f"[!] 读取视频列表失败：{exc}")
+        videos = []
     props = adb.props()
     model = props.get("ro.product.model", "") or props.get("ro.product.vendor.model", "")
     android = props.get("ro.build.version.release", "")
@@ -2131,6 +2869,10 @@ def prepare_studio(
         apply_workers=max(1, min(int(getattr(args, "apply_workers", 4)), 4)),
         hardware_encoder=hardware_encoder,
         history=_load_history(),
+        videos=videos,
+        video_by_path={video.path: video for video in videos},
+        video_by_id={video.media_id: video for video in videos},
+        video_history=_load_video_history(),
         model=model,
         android=android,
     )
@@ -2157,6 +2899,7 @@ def serve(args) -> int:
     print()
     print(f"  Klean Studio  {state.model}  Android {state.android}")
     print(f"  实况照片 {len(runtime.pairs):,} 个 / {human(sum(pair.size for pair in runtime.pairs))}")
+    print(f"  普通视频 {len(state.videos):,} 个 / {human(sum(video.size for video in state.videos))}")
     print(
         f"  日期 {len(state.dates()):,} 天；时长未知 {runtime.unknown:,} 个；"
         f"超长 {runtime.too_long:,} 个"
