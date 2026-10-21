@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+def keystorePath = System.getenv('KLEAN_ANDROID_KEYSTORE')
+def keystorePassword = System.getenv('KLEAN_ANDROID_STORE_PASSWORD')
+def signingAlias = System.getenv('KLEAN_ANDROID_KEY_ALIAS')
+def signingKeyPassword = System.getenv('KLEAN_ANDROID_KEY_PASSWORD')
+
+android {
+    namespace 'com.kkkkahn.klean.mobile'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.kkkkahn.klean.mobile'
+        minSdk 29
+        targetSdk 35
+        versionCode 10
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        if (keystorePath) {
+            release {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (keystorePath) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

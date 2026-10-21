@@ -1,13 +1,14 @@
 # Klean
 
-> **不 Root、纯 ADB 的安卓存储审计与安全清理工具。**
-> 先看清楚空间去哪了，再决定删什么。
+> **不 Root 的安卓存储清理与实况照片压缩工具。**
+> 电脑端走 ADB 审计与压缩，手机端可以完全离线运行。先看清空间去哪了，再决定删什么。
 
 [![CI](https://github.com/KKKKahn/klean/actions/workflows/ci.yml/badge.svg)](https://github.com/KKKKahn/klean/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
-[![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/latest)
+[![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
+[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0)
 
 `klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
@@ -19,7 +20,9 @@
 
 > iPhone 不支持。iOS 没有 ADB 这类通用调试通道，清理方式完全不同。
 
-> **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/latest) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
+> **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
+>
+> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
 
 
 ---
@@ -29,6 +32,7 @@
 - [为什么做这个](#为什么做这个)
 - [功能](#功能)
 - [macOS 应用](#macos-应用)
+- [Android 应用](#android-应用)
 - [视频模式](#视频模式)
 - [安全模型](#安全模型先读)
 - [安装](#安装)
@@ -46,7 +50,7 @@
 
 ## macOS 应用
 
-[下载最新版 macOS 应用](https://github.com/KKKKahn/klean/releases/latest)
+[下载 macOS 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
 
 - 面向 Apple Silicon（M1–M6），macOS 12 Monterey 及以上。
 - 内置 adb、ffmpeg、ffprobe 与 Python 运行时，不需要自己安装依赖。
@@ -63,6 +67,45 @@
 ```
 
 构建脚本会下载 adb 与 ffmpeg；需要 Python 3.9+ 和网络。
+
+## Android 应用
+
+[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0) · Android 10 及以上 · 无需 Root、无需电脑
+
+Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需要 ADB：
+
+- **实况照片 + 普通视频** 两条独立赛道，自动识别同名的 JPG + MP4 配对，只处理伴生 MP4。
+- 三列相册网格；长按后手指滑过多少张就选中多少张，滑到边缘会继续滚动。
+- 压缩状态筛选（全部 / 未压缩 / 已压缩）、日期范围筛选、按时间 / 大小排序。
+- 三档压缩质量；MediaCodec 硬件编码，实测实况短片段约 **2.7–7.1× 实时**，每张约 0.3–0.5 秒。
+- 压缩完成后先进入结果页：逐条预览压缩版、查看节省比例和速度，勾选后才应用。
+- 应用前自动把原 MP4 备份到 App 私有目录，原子替换、MD5 校验，JPG 定格画面永不修改。
+- 保留 vivo 的 `vivoMediaExtInfo` uuid box；HDR / 10-bit 等不安全格式会跳过并说明原因。
+- 顶部「备份」入口可以查看所有原片批次、预览、勾选恢复或删除；恢复后自动移除压缩历史。
+- 全部在本机完成，App 不申请联网权限。
+
+安装说明：
+
+1. 下载 APK，允许浏览器/文件管理器「安装未知应用」；这是侧载应用，不上架应用商店。
+2. 首次打开按提示授予「所有文件访问」权限；Android 10 会改为申请存储读写权限。
+3. 备份位于 App 私有目录（`Android/data/com.kkkkahn.klean.mobile/files/backups`），**卸载 App 会一起删除备份**；确认手机上的压缩版正常前不要卸载。
+4. 建议先选 1–3 张实况或一个小视频试压缩，预览并播放确认画质后再批量处理。
+
+从源码构建 Android APK：
+
+```bash
+cd android
+# 需要 JDK 17+、Android SDK 35
+./gradlew assembleDebug
+# 或用自己的签名构建 release：
+KLEAN_ANDROID_KEYSTORE=/path/to/klean.jks \
+KLEAN_ANDROID_STORE_PASSWORD=... \
+KLEAN_ANDROID_KEY_ALIAS=klean \
+KLEAN_ANDROID_KEY_PASSWORD=... \
+./gradlew assembleRelease
+```
+
+APK 输出在 `android/app/build/outputs/apk/`。
 
 ## 为什么做这个
 
