@@ -331,11 +331,10 @@ function renderSidebar() {
       if (isOpen) {
         state.expandedMonths.delete(month);
         group.classList.remove('open');
-      } else {
-        state.expandedMonths.add(month);
-        group.classList.add('open');
+        return;
       }
-      if (state.view && state.view.type === 'month' && state.view.month === month && isOpen) return;
+      state.expandedMonths.add(month);
+      group.classList.add('open');
       showMonth(month);
     });
     head.appendChild(toggle);
