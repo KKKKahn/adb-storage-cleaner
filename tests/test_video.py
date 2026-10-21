@@ -156,3 +156,23 @@ def test_build_video_command_rejects_hdr(monkeypatch):
         pass
     else:
         raise AssertionError("10-bit video should be rejected")
+
+
+def test_build_video_command_software_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "klean.video._encoder_list",
+        lambda ffmpeg: "h264_videotoolbox libx264",
+    )
+    command, encoder, quality, hardware = _build_command(
+        "in.mp4",
+        "out.mp4",
+        VIDEO_PRESETS["balanced"],
+        video_info(),
+        "ffmpeg",
+        force_software=True,
+    )
+    assert encoder == "libx264"
+    assert quality is None
+    assert hardware is False
+    assert "-crf" in command
+    assert "20" in command

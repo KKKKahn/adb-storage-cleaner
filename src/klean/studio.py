@@ -1200,6 +1200,8 @@ def _video_compress_one(
         item.status = "running"
         item.progress = max(item.progress, 0.02)
         item.phase = "拉取中"
+    local_src = None
+    local_out = None
     try:
         video = state.video_by_path.get(item.mp4)
         if video is None:
@@ -1262,22 +1264,39 @@ def _video_compress_one(
             item.status = "ready"
             item.progress = 1.0
             item.phase = ""
-            item.reason = "音频已重编码" if result.audio_reencoded else ""
+            reasons = []
+            if result.fallback_note:
+                reasons.append(result.fallback_note)
+            if result.audio_reencoded:
+                reasons.append("音频已重编码")
+            item.reason = "；".join(reasons)
     except (HdrUnsupported, UnsupportedFormat, NoBenefit) as exc:
         with state.lock:
             item.status = "skipped"
             item.reason = str(exc)
             item.progress = 1.0
+        for stale in (local_out, local_src):
+            if stale is not None:
+                with contextlib.suppress(OSError):
+                    stale.unlink()
     except (BadRequest, CompressError, ADBError, OSError, ValueError) as exc:
         with state.lock:
             item.status = "error"
             item.reason = str(exc)
             item.progress = 1.0
+        for stale in (local_out, local_src):
+            if stale is not None:
+                with contextlib.suppress(OSError):
+                    stale.unlink()
     except Exception as exc:
         with state.lock:
             item.status = "error"
             item.reason = f"{type(exc).__name__}: {exc}"
             item.progress = 1.0
+        for stale in (local_out, local_src):
+            if stale is not None:
+                with contextlib.suppress(OSError):
+                    stale.unlink()
     finally:
         with state.lock:
             item.elapsed_ms = int((time.monotonic() - started) * 1000)

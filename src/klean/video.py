@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import os
 import re
@@ -33,8 +34,10 @@ from .live import LIVE_RE
 VIDEO_MIME = "video/mp4"
 VIDEO_EXT = ".mp4"
 PROBABLE_LIVE_MAX_MS = 5000
-VIDEO_WORKERS = 2
+VIDEO_WORKERS = 6 if (os.cpu_count() or 0) >= 12 else 3
 VIDEO_TIMEOUT = 7200
+MIN_FALLBACK_SAVINGS = 0.10
+MIN_FALLBACK_BYTES = 1_000_000
 VIDEO_BATCH_SUGGESTION = 6_000_000_000
 
 
@@ -84,6 +87,7 @@ class VideoCompressResult:
     audio_reencoded: bool
     speed_used: str
     elapsed_ms: int
+    fallback_note: str = ""
 
 
 def _as_int(value: object, default: int = 0) -> int:
@@ -273,6 +277,7 @@ def _build_command(
     preset: VideoPreset,
     info: VideoInfo,
     ffmpeg: str,
+    force_software: bool = False,
 ) -> Tuple[List[str], str, Optional[int], bool]:
     if info.codec_name not in ("h264", "hevc"):
         raise UnsupportedFormat(f"暂不支持 {info.codec_name or '未知'} 编码的视频")
@@ -283,10 +288,10 @@ def _build_command(
         raise HdrUnsupported(reason)
     hardware = _hardware_encoder(info, ffmpeg)
     software = _software_encoder(info, ffmpeg)
-    encoder = hardware or software
+    use_hardware = bool(hardware) and not force_software
+    encoder = hardware if use_hardware else software
     if not encoder:
         raise UnsupportedFormat(f"没有可用的 {info.codec_name} 编码器")
-    use_hardware = bool(hardware)
     command = [
         ffmpeg,
         "-hide_banner",
@@ -339,21 +344,18 @@ def _build_command(
     return command, encoder, preset.quality if use_hardware else None, use_hardware
 
 
-def compress_regular_video(
+def _encode_attempt(
     src: str,
     dst: str,
     preset: VideoPreset,
-    ffmpeg: str = "ffmpeg",
-    ffprobe: str = "ffprobe",
-    timeout: int = VIDEO_TIMEOUT,
-    on_progress: Optional[Callable[[float], None]] = None,
-) -> VideoCompressResult:
-    import time
-
-    started = time.monotonic()
-    info = probe_video(src, ffprobe)
+    info: VideoInfo,
+    ffmpeg: str,
+    timeout: int,
+    on_progress: Optional[Callable[[float], None]],
+    force_software: bool,
+) -> Tuple[int, bool, str, Optional[int], bool]:
     command, encoder, quality, use_hardware = _build_command(
-        src, dst, preset, info, ffmpeg
+        src, dst, preset, info, ffmpeg, force_software=force_software
     )
     progress_command = list(command)
     if on_progress is not None and info.duration > 0:
@@ -380,22 +382,127 @@ def compress_regular_video(
         raise CompressError(f"视频编码失败: {stderr or '未知错误'}")
 
     if info.duration > 120:
-        _run([ffmpeg, "-v", "error", "-i", dst, "-t", "5", "-f", "null", "-"], min(timeout, 120))
+        _run(
+            [ffmpeg, "-v", "error", "-i", dst, "-t", "5", "-f", "null", "-"],
+            min(timeout, 120),
+        )
     else:
         verify_decodable(dst, ffmpeg, timeout)
+    return os.path.getsize(dst), audio_reencoded, encoder, quality, use_hardware
+
+
+def compress_regular_video(
+    src: str,
+    dst: str,
+    preset: VideoPreset,
+    ffmpeg: str = "ffmpeg",
+    ffprobe: str = "ffprobe",
+    timeout: int = VIDEO_TIMEOUT,
+    on_progress: Optional[Callable[[float], None]] = None,
+) -> VideoCompressResult:
+    import time
+
+    started = time.monotonic()
+    info = probe_video(src, ffprobe)
+    hardware = _hardware_encoder(info, ffmpeg)
+    software = _software_encoder(info, ffmpeg)
+    if not hardware and not software:
+        if info.codec_name not in ("h264", "hevc"):
+            raise UnsupportedFormat(f"暂不支持 {info.codec_name or '未知'} 编码的视频")
+        if info.pix_fmt not in SAFE_PIX_FMTS:
+            raise UnsupportedFormat(f"暂不支持像素格式 {info.pix_fmt}")
+        reason = hdr_reason(info)
+        if reason:
+            raise HdrUnsupported(reason)
+        raise UnsupportedFormat(f"没有可用的 {info.codec_name} 编码器")
+    reason = hdr_reason(info)
+    if reason:
+        raise HdrUnsupported(reason)
     original_size = os.path.getsize(src)
-    compressed_size = os.path.getsize(dst)
-    if compressed_size >= original_size:
+    attempts = []
+    errors = []
+
+    def attempt(force_software: bool, attempt_preset: VideoPreset, label: str):
+        path = f"{dst}.{label}.mp4"
+        try:
+            size, audio, encoder, quality, use_hw = _encode_attempt(
+                src,
+                path,
+                attempt_preset,
+                info,
+                ffmpeg,
+                timeout,
+                on_progress,
+                force_software,
+            )
+            attempts.append(
+                (size, audio, encoder, quality, use_hw, attempt_preset, path)
+            )
+            return size
+        except Exception as exc:
+            errors.append(str(exc))
+            with contextlib.suppress(OSError):
+                if os.path.exists(path):
+                    os.unlink(path)
+            return None
+
+    def savings(size: int) -> float:
+        return (original_size - size) / original_size if original_size else 0.0
+
+    hardware_attempt = None
+    if hardware:
+        hardware_attempt = attempt(False, preset, "hw")
+    need_software = software and (
+        hardware_attempt is None
+        or hardware_attempt >= original_size
+        or savings(hardware_attempt) < MIN_FALLBACK_SAVINGS
+    )
+    if not hardware:
+        need_software = True
+    if original_size < MIN_FALLBACK_BYTES:
+        # Tiny chat/screenshot clips are already compact; software retries add
+        # little value and make batches slow.
+        need_software = False
+    if need_software and software:
+        software_attempt = attempt(True, preset, "sw")
+        if (
+            preset.key == "balanced"
+            and software_attempt is not None
+            and savings(software_attempt) < MIN_FALLBACK_SAVINGS
+        ):
+            attempt(True, VIDEO_PRESETS["small"], "sw23")
+
+    profitable = [item for item in attempts if item[0] < original_size]
+    if not profitable:
+        for item in attempts:
+            with contextlib.suppress(OSError):
+                os.unlink(item[6])
+        detail = f"，最小尝试 {min((item[0] for item in attempts), default=0)} 字节" if attempts else ""
         raise NoBenefit(
-            f"压缩后没有变小（{original_size} → {compressed_size} 字节）"
+            f"压缩后没有变小（原 {original_size} 字节{detail}）；已跳过，未改手机"
         )
+    best = min(profitable, key=lambda item: item[0])
+    os.replace(best[6], dst)
+    for item in attempts:
+        if item[6] != best[6]:
+            with contextlib.suppress(OSError):
+                os.unlink(item[6])
+    fallback_note = ""
+    if not best[4]:
+        if hardware and hardware_attempt is not None:
+            fallback_note = "硬件收益不足，已改用软件 CRF%d" % best[5].crf
+        elif hardware and hardware_attempt is None:
+            fallback_note = "硬件编码失败，已改用软件 CRF%d" % best[5].crf
+        else:
+            fallback_note = "未检测到硬件编码，已用软件 CRF%d" % best[5].crf
     return VideoCompressResult(
         original_size=original_size,
-        compressed_size=compressed_size,
+        compressed_size=best[0],
         codec=info.codec_name,
-        crf=preset.crf,
-        quality=quality,
-        audio_reencoded=audio_reencoded,
-        speed_used="hardware" if use_hardware else "veryfast",
+        crf=best[5].crf,
+        quality=best[3],
+        audio_reencoded=best[1],
+        speed_used="hardware" if best[4] else "veryfast",
         elapsed_ms=int((time.monotonic() - started) * 1000),
+        fallback_note=fallback_note,
     )
