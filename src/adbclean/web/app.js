@@ -39,6 +39,9 @@ const state = {
   jobRowsId: '',
   actionsSignature: '',
   poll: null,
+  events: null,
+  jobInflight: false,
+  jobFinished: false,
   compressJob: null,
   uncheckedResults: new Set(),
   clearedSessions: new Set(),
@@ -89,6 +92,11 @@ function thumbUrl(photo) {
 function previewUrl(jobId, mp4) {
   return '/api/preview?job=' + encodeURIComponent(jobId) +
     '&path=' + encodeURIComponent(mp4) + '&token=' + encodeURIComponent(TOKEN);
+}
+
+function phoneVideoUrl(photo) {
+  return '/api/media?path=' + encodeURIComponent(photo.mp4) +
+    '&token=' + encodeURIComponent(TOKEN);
 }
 
 async function api(path, options) {
@@ -759,7 +767,8 @@ function makeCard(photo) {
     card.classList.add('is-compressed');
     const badge = document.createElement('span');
     badge.className = 'compressed-badge';
-    badge.textContent = '已压缩';
+    badge.textContent = '✓';
+    badge.setAttribute('aria-label', '已压缩');
     badge.title = '已压缩' + (photo.history_crf ? '（CRF' + photo.history_crf + '）' : '') +
       (photo.history_size ? ' · ' + formatBytes(photo.history_size) : '');
     card.appendChild(badge);
@@ -828,9 +837,26 @@ function makeCard(photo) {
   foot.appendChild(duration);
   card.appendChild(foot);
 
+  let selectTimer = null;
   card.addEventListener('click', function (event) {
-    if (event.target.closest('input')) return;
-    togglePhoto(photo, !state.selected.has(photo.mp4));
+    if (event.target.closest('input, label')) return;
+    if (selectTimer) {
+      window.clearTimeout(selectTimer);
+      selectTimer = null;
+      return;
+    }
+    selectTimer = window.setTimeout(function () {
+      selectTimer = null;
+      togglePhoto(photo, !state.selected.has(photo.mp4));
+    }, 220);
+  });
+  card.addEventListener('dblclick', function (event) {
+    if (event.target.closest('input, label')) return;
+    if (selectTimer) {
+      window.clearTimeout(selectTimer);
+      selectTimer = null;
+    }
+    openPhonePreview(photo);
   });
   return card;
 }
@@ -1114,12 +1140,17 @@ function itemStatusLabel(status) {
 
 function showJob(jobId, kind) {
   if (state.poll) window.clearInterval(state.poll);
+  if (state.events) { state.events.close(); state.events = null; }
+  state.jobFinished = false;
+  state.jobInflight = false;
   $('job-panel').classList.remove('hidden');
+  $('job-panel').classList.remove('collapsed');
+  $('job-collapse').textContent = '收起详情';
   state.jobRowsId = '';
   state.jobRows = new Map();
   state.actionsSignature = '';
   state.busy = true;
-  state.job = { id: jobId, kind: kind, status: 'running', items: [], done: 0, total: 0 };
+  state.job = { id: jobId, kind: kind, status: 'running', items: [], done: 0, total: 0, progress: 0 };
   $('job-title').textContent = jobTitle(kind);
   $('job-status').textContent = '进行中';
   $('job-status').className = 'pill running';
@@ -1131,50 +1162,98 @@ function showJob(jobId, kind) {
   updateBusy();
   $('job-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-  async function tick() {
+  async function finalize() {
+    if (state.jobFinished) return;
+    state.jobFinished = true;
+    if (state.poll) { window.clearInterval(state.poll); state.poll = null; }
+    if (state.events) { state.events.close(); state.events = null; }
     try {
       const job = await api('/api/jobs/' + encodeURIComponent(jobId));
       state.job = job;
       renderJob(job);
-      if (job.status !== 'running') {
-        window.clearInterval(state.poll);
-        state.poll = null;
-        state.busy = false;
-        updateBusy();
-        await afterJob(job);
-      }
+      state.busy = false;
+      updateBusy();
+      await afterJob(job);
     } catch (error) {
-      window.clearInterval(state.poll);
-      state.poll = null;
       state.busy = false;
       updateBusy();
       toast(error.message, true);
     }
   }
+
+  async function tick() {
+    if (state.jobFinished || state.jobInflight) return;
+    state.jobInflight = true;
+    try {
+      const job = await api('/api/jobs/' + encodeURIComponent(jobId));
+      if (state.jobFinished) return;
+      state.job = job;
+      renderJob(job);
+      if (job.status !== 'running') await finalize();
+    } catch (error) {
+      if (!state.events) {
+        if (state.poll) { window.clearInterval(state.poll); state.poll = null; }
+        state.busy = false;
+        updateBusy();
+        toast(error.message, true);
+      }
+    } finally {
+      state.jobInflight = false;
+    }
+  }
+
   tick();
-  state.poll = window.setInterval(tick, 700);
+  state.poll = window.setInterval(tick, 1500);
+
+  if (window.EventSource) {
+    const events = new EventSource(
+      '/api/jobs/' + encodeURIComponent(jobId) + '/events?token=' + encodeURIComponent(TOKEN)
+    );
+    state.events = events;
+    events.onmessage = function (event) {
+      if (state.jobFinished) return;
+      let progress;
+      try { progress = JSON.parse(event.data); } catch (error) { return; }
+      state.job = Object.assign({}, state.job, progress);
+      renderJobProgress(progress);
+      if (progress.status !== 'running') finalize();
+    };
+    events.onerror = function () {
+      events.close();
+      if (state.events === events) state.events = null;
+    };
+  }
 }
 
-function renderJob(job) {
-  $('job-title').textContent = jobTitle(job.kind);
+function renderJobProgress(job) {
+  $('job-panel').classList.toggle('job-done', job.status !== 'running');
   const pill = $('job-status');
   pill.textContent = jobStatusLabel(job.status);
   pill.className = 'pill ' + job.status;
   const percent = job.total > 0
-    ? Math.min(100, Math.round(job.done * 100 / job.total))
+    ? Math.min(100, Math.round((job.progress != null ? job.progress : job.done / job.total) * 100))
     : (job.status === 'done' ? 100 : 0);
   $('job-progress').style.width = percent + '%';
   $('job-message').textContent = job.error || job.message || '';
   if (job.status === 'running') {
     $('job-counts').textContent = job.total ? job.done + ' / ' + job.total : '';
-  } else if (job.items.length) {
+  }
+}
+
+function renderJob(job) {
+  $('job-title').textContent = jobTitle(job.kind);
+  renderJobProgress(job);
+  const pill = $('job-status');
+  pill.textContent = jobStatusLabel(job.status);
+  pill.className = 'pill ' + job.status;
+  if (job.status !== 'running' && job.items.length) {
     const good = job.items.filter(function (item) {
       return item.status === 'ready' || item.status === 'applied' || item.status === 'restored';
     }).length;
     const skipped = job.items.filter(function (item) { return item.status === 'skipped'; }).length;
     const errors = job.items.filter(function (item) { return item.status === 'error'; }).length;
     $('job-counts').textContent = '完成 ' + good + ' · 跳过 ' + skipped + ' · 失败 ' + errors;
-  } else {
+  } else if (job.status !== 'running') {
     $('job-counts').textContent = '';
   }
   renderJobRows(job);
@@ -1832,22 +1911,49 @@ async function restoreBackupSession(session) {
 
 /* ----------------------------------------------------------------- preview */
 
-function openPreview(item) {
-  if (!state.compressJob) return;
+function openVideoPreview(title, sub, src, loadingSub) {
   const video = $('preview-video');
-  $('preview-title').textContent = item.time + ' · ' + basename(item.mp4) + '（压缩版）';
-  const saved = item.original_size ? Math.round((item.original_size - item.compressed_size) * 100 / item.original_size) : 0;
-  $('preview-sub').textContent = formatBytes(item.original_size) + ' → ' +
-    formatBytes(item.compressed_size) + ' · 省 ' + saved + '%' +
-    (item.ssim ? ' · SSIM ' + item.ssim.toFixed(4) : '');
-  video.src = previewUrl(state.compressJob.id, item.mp4);
+  $('preview-title').textContent = title;
+  $('preview-sub').textContent = loadingSub || sub;
+  video.onloadeddata = function () {
+    $('preview-sub').textContent = sub;
+  };
+  video.onerror = function () {
+    $('preview-sub').textContent = '视频加载失败，请确认手机仍连接并保持解锁';
+  };
+  video.src = src;
   $('preview').classList.remove('hidden');
   const play = video.play();
   if (play && play.catch) play.catch(function () {});
 }
 
+function openPreview(item) {
+  if (!state.compressJob) return;
+  const saved = item.original_size ? Math.round((item.original_size - item.compressed_size) * 100 / item.original_size) : 0;
+  const sub = formatBytes(item.original_size) + ' → ' +
+    formatBytes(item.compressed_size) + ' · 省 ' + saved + '%' +
+    (item.ssim ? ' · SSIM ' + item.ssim.toFixed(4) : '');
+  openVideoPreview(
+    item.time + ' · ' + basename(item.mp4) + '（压缩版）',
+    sub,
+    previewUrl(state.compressJob.id, item.mp4)
+  );
+}
+
+function openPhonePreview(photo) {
+  const size = formatBytes(photo.size);
+  openVideoPreview(
+    photo.time + ' · ' + basename(photo.mp4),
+    size + ' · ' + (photo.compressed ? '手机上的压缩版' : '原始 MP4') + ' · 双击卡片播放',
+    phoneVideoUrl(photo),
+    size + ' · 正在从手机加载视频…'
+  );
+}
+
 function closePreview() {
   const video = $('preview-video');
+  video.onloadeddata = null;
+  video.onerror = null;
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -1970,6 +2076,10 @@ function bindEvents() {
   $('preview-close').addEventListener('click', closePreview);
   $('preview').addEventListener('click', function (event) {
     if (event.target === $('preview')) closePreview();
+  });
+  $('job-collapse').addEventListener('click', function () {
+    const collapsed = $('job-panel').classList.toggle('collapsed');
+    this.textContent = collapsed ? '展开详情' : '收起详情';
   });
   $('backup-btn').addEventListener('click', openBackups);
   $('backup-clear-all').addEventListener('click', deleteAllBackups);

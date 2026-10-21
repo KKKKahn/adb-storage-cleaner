@@ -8,6 +8,7 @@ treating the pair as a live photo.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -15,8 +16,10 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 VIVO_UUID_USER_TYPE = b"vivoMediaExtInfo"
 
@@ -496,6 +499,61 @@ def _run(command: List[str], timeout: int) -> subprocess.CompletedProcess:
         raise CompressError(f"编码超时（{timeout}s）") from exc
 
 
+def _run_with_progress(
+    command: List[str],
+    timeout: int,
+    duration_s: float,
+    on_progress: Callable[[float], None],
+) -> subprocess.CompletedProcess:
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise CompressError(f"找不到 ffmpeg: {command[0]}") from exc
+    stderr_chunks: List[bytes] = []
+
+    def drain_stderr() -> None:
+        with contextlib.suppress(Exception):
+            stderr_chunks.append(proc.stderr.read())
+
+    drainer = threading.Thread(target=drain_stderr, daemon=True)
+    drainer.start()
+    started = time.monotonic()
+    try:
+        for raw in iter(proc.stdout.readline, b""):
+            if time.monotonic() - started > timeout:
+                proc.kill()
+                raise CompressError(f"编码超时（{timeout}s）")
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("out_time_us=") or duration_s <= 0:
+                continue
+            try:
+                micros = int(line.split("=", 1)[1])
+            except ValueError:
+                continue
+            fraction = micros / 1_000_000 / duration_s
+            with contextlib.suppress(Exception):
+                on_progress(max(0.0, min(1.0, fraction)))
+        proc.wait(timeout=max(1.0, timeout - (time.monotonic() - started)))
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.wait()
+        raise CompressError(f"编码超时（{timeout}s）") from exc
+    finally:
+        with contextlib.suppress(Exception):
+            proc.stdout.close()
+        if proc.poll() is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+                proc.wait()
+    drainer.join(timeout=1)
+    stderr = b"".join(chunk for chunk in stderr_chunks if chunk)
+    return subprocess.CompletedProcess(command, proc.returncode, b"", stderr)
+
+
 def encode_video(
     src: str,
     dst: str,
@@ -505,10 +563,18 @@ def encode_video(
     timeout: int = 900,
     speed: str = "slow",
     hardware_q: Optional[int] = None,
+    on_progress: Optional[Callable[[float], None]] = None,
 ) -> bool:
     """Encode src to dst. Returns True when audio had to be re-encoded."""
     command = build_encode_command(src, dst, preset, info, ffmpeg, speed, hardware_q)
-    result = _run(command, timeout)
+    if on_progress is not None and preset.mode != "copy":
+        progress_command = list(command)
+        progress_command[1:1] = ["-progress", "pipe:1", "-nostats"]
+        result = _run_with_progress(
+            progress_command, timeout, float(info.duration or 0), on_progress
+        )
+    else:
+        result = _run(command, timeout)
     if result.returncode == 0:
         return False
     stderr = result.stderr.decode("utf-8", "replace").strip()
@@ -667,6 +733,7 @@ def compress_file(
     compute_ssim: bool = True,
     require_vivo_uuid: bool = True,
     speed: str = "slow",
+    on_progress: Optional[Callable[[float], None]] = None,
 ) -> CompressResult:
     """Compress one MP4 into ``dst``; never modifies ``src``.
 
@@ -700,8 +767,23 @@ def compress_file(
     best_label = ""
     hardware_failed = False
     fallback_notes: List[str] = []
+    attempt_index = 0
+    # Hardware attempts may be followed by one or two software retries, so
+    # reserve progress space for each pass instead of restarting the bar.
+    attempt_ranges = (
+        [(0.0, 0.5), (0.5, 0.75), (0.75, 0.88)]
+        if speed == "hardware" and preset.mode != "copy"
+        else [(0.0, 0.85)]
+    )
 
     def run_attempt(attempt_speed: str, attempt_q: Optional[int], attempt_preset: Preset):
+        nonlocal attempt_index
+        lo, hi = attempt_ranges[min(attempt_index, len(attempt_ranges) - 1)]
+        attempt_index += 1
+        progress_callback = None
+        if on_progress is not None:
+            def progress_callback(fraction: float, lo=lo, hi=hi) -> None:
+                on_progress(lo + (hi - lo) * fraction)
         audio = encode_video(
             src,
             temp_path,
@@ -711,6 +793,7 @@ def compress_file(
             timeout,
             speed=attempt_speed,
             hardware_q=attempt_q,
+            on_progress=progress_callback,
         )
         if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
             raise NoVivoUuid(

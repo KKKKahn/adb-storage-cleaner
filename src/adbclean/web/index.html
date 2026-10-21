@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="adbclean-token" content="__ADBCLEAN_TOKEN__">
 <title>adbclean Studio · 实况照片压缩</title>
-<link rel="stylesheet" href="/static/style.css?v=0.2.5">
+<link rel="stylesheet" href="/static/style.css?v=0.2.6">
 </head>
 <body>
 <header class="topbar">
@@ -46,6 +46,23 @@
   </aside>
 
   <main class="content" id="content">
+    <section id="job-panel" class="panel hidden" aria-live="polite">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h3 id="job-title">任务</h3>
+          <span id="job-counts" class="job-counts"></span>
+        </div>
+        <div class="panel-head-right">
+          <span id="job-status" class="pill"></span>
+          <button id="job-collapse" class="link" type="button">收起详情</button>
+        </div>
+      </div>
+      <div class="progress"><div id="job-progress"></div></div>
+      <p id="job-message" class="sub"></p>
+      <div id="job-items" class="result-list"></div>
+      <div id="job-actions" class="panel-actions"></div>
+    </section>
+
     <div class="content-top">
       <div class="content-head">
         <div>
@@ -92,20 +109,6 @@
     <div id="load-more-wrap" class="load-more hidden">
       <button id="load-more" class="ghost" type="button">加载更多</button>
     </div>
-
-    <section id="job-panel" class="panel hidden" aria-live="polite">
-      <div class="panel-head">
-        <div class="panel-title">
-          <h3 id="job-title">任务</h3>
-          <span id="job-counts" class="job-counts"></span>
-        </div>
-        <span id="job-status" class="pill"></span>
-      </div>
-      <div class="progress"><div id="job-progress"></div></div>
-      <p id="job-message" class="sub"></p>
-      <div id="job-items" class="result-list"></div>
-      <div id="job-actions" class="panel-actions"></div>
-    </section>
   </main>
 </div>
 
@@ -162,7 +165,7 @@
   </div>
 </div>
 
-<div id="preview" class="modal hidden" role="dialog" aria-modal="true" aria-label="压缩结果预览">
+<div id="preview" class="modal hidden" role="dialog" aria-modal="true" aria-label="视频预览">
   <div class="modal-card preview-card">
     <div class="panel-head">
       <h3 id="preview-title">预览</h3>
@@ -190,6 +193,6 @@
 
 <div id="toast" class="toast hidden" role="status"></div>
 
-<script src="/static/app.js?v=0.2.5"></script>
+<script src="/static/app.js?v=0.2.6"></script>
 </body>
 </html>

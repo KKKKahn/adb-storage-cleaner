@@ -26,6 +26,7 @@ from adbclean.studio import (
     _history_entry,
     _history_skip_reason,
     _job_file,
+    _job_progress,
     _load_history,
     _migrate_legacy_backups,
     _photo_payload,
@@ -311,6 +312,36 @@ def test_api_delete_backups_requires_confirmation(studio_server):
         "/api/delete-backups",
         token="test-token",
         body={"session": "x", "confirm": "delete-backups"},
+    )
+    assert status == 400
+
+
+def test_job_progress_tracks_partial_items():
+    job = Job(id="progress1", kind="compress", total=3)
+    job.items = [
+        ItemResult(
+            "/sdcard/a.mp4", "/sdcard/a.jpg", "2026-01-02", "03:04:05",
+            status="ready",
+        ),
+        ItemResult(
+            "/sdcard/b.mp4", "/sdcard/b.jpg", "2026-01-02", "03:04:06",
+            status="running", progress=0.5,
+        ),
+        ItemResult(
+            "/sdcard/c.mp4", "/sdcard/c.jpg", "2026-01-02", "03:04:07",
+            status="pending",
+        ),
+    ]
+    assert _job_progress(job) == pytest.approx(0.5)
+
+
+def test_job_progress_empty_done_is_complete():
+    assert _job_progress(Job(id="empty1", kind="scan", total=1, status="done")) == 1.0
+
+
+def test_api_media_rejects_unknown_path(studio_server):
+    status, _ = studio_server.json(
+        "GET", "/api/media?path=/sdcard/nope.mp4&token=test-token"
     )
     assert status == 400
 

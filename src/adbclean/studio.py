@@ -91,6 +91,8 @@ class ItemResult:
     elapsed_ms: int = 0
     crf_used: Optional[int] = None
     speed_used: str = ""
+    progress: float = 0.0
+    phase: str = ""
 
 
 @dataclass
@@ -106,6 +108,23 @@ class Job:
     items: List[ItemResult] = field(default_factory=list)
     finished_at: str = ""
     cancel_requested: bool = False
+
+
+TERMINAL_ITEM_STATUSES = frozenset(
+    {"ready", "skipped", "error", "applied", "restored"}
+)
+
+
+def _job_progress(job: Job) -> float:
+    if not job.items:
+        return 1.0 if job.status == "done" else 0.0
+    total = 0.0
+    for item in job.items:
+        if item.status in TERMINAL_ITEM_STATUSES:
+            total += 1.0
+        else:
+            total += max(0.0, min(1.0, item.progress))
+    return max(0.0, min(1.0, total / len(job.items)))
 
 
 @dataclass
@@ -662,6 +681,15 @@ def _restore_one(
     _push_replace(state, backup_path, remote, expected_md5, mtime)
 
 
+def _set_item_progress(
+    state: StudioState, item: ItemResult, value: float, phase: Optional[str] = None
+) -> None:
+    with state.lock:
+        item.progress = max(item.progress, min(1.0, value))
+        if phase is not None:
+            item.phase = phase
+
+
 def _compress_one(
     state: StudioState,
     job: Job,
@@ -678,13 +706,17 @@ def _compress_one(
         with state.lock:
             item.status = "skipped"
             item.reason = "用户已停止任务"
+            item.progress = 1.0
             job.done += 1
         return
     with state.lock:
         if item.status == "skipped":
+            item.progress = 1.0
             job.done += 1
             return
         item.status = "running"
+        item.progress = max(item.progress, 0.02)
+        item.phase = "拉取中"
     try:
         pair = state.pairs_by_mp4.get(item.mp4)
         if pair is None:
@@ -721,6 +753,7 @@ def _compress_one(
             raise CompressError(f"拉取大小不一致 {local_size} != {remote_size}")
         original_md5 = _local_md5(local_src)
         local_out = out_dir / (_safe_sha1(pair.mp4)[:12] + "-" + pair.mp4.rsplit("/", 1)[-1])
+        _set_item_progress(state, item, 0.08, "编码中")
         result = compress_file(
             str(local_src),
             str(local_out),
@@ -729,7 +762,11 @@ def _compress_one(
             ffprobe=state.ffprobe,
             compute_ssim=compute_ssim,
             speed=speed,
+            on_progress=lambda fraction: _set_item_progress(
+                state, item, 0.08 + 0.84 * fraction
+            ),
         )
+        _set_item_progress(state, item, 0.94, "校验中")
         compressed_md5 = _local_md5(local_out)
         with state.lock:
             item.original_size = result.original_size
@@ -744,6 +781,8 @@ def _compress_one(
             item.crf_used = result.crf_used
             item.speed_used = result.speed_used
             item.status = "ready"
+            item.progress = 1.0
+            item.phase = ""
             reasons = []
             if result.fallback_note:
                 reasons.append(result.fallback_note)
@@ -754,17 +793,22 @@ def _compress_one(
         with state.lock:
             item.status = "skipped"
             item.reason = str(exc)
+            item.progress = 1.0
     except (BadRequest, CompressError, ADBError, OSError, ValueError) as exc:
         with state.lock:
             item.status = "error"
             item.reason = str(exc)
+            item.progress = 1.0
     except Exception as exc:  # keep one bad file from aborting a batch
         with state.lock:
             item.status = "error"
             item.reason = f"{type(exc).__name__}: {exc}"
+            item.progress = 1.0
     finally:
         with state.lock:
             item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            if item.status in TERMINAL_ITEM_STATUSES:
+                item.progress = 1.0
             job.done += 1
 
 
@@ -818,6 +862,8 @@ def _apply_one(
     started = time.monotonic()
     with state.lock:
         item.status = "running"
+        item.progress = max(item.progress, 0.02)
+        item.phase = "校验中"
     try:
         src = state.find_item(source_job.id, item.mp4)
         if src is None or src.status not in ("ready", "applied"):
@@ -857,11 +903,13 @@ def _apply_one(
             )
         mtime = int(stat_parts[0]) or src.mtime
         mode = stat_parts[1] or "660"
+        _set_item_progress(state, item, 0.12, "备份中")
         source_local = _job_file(state, source_job.id, src.source)
         if source_local is None or not source_local.exists():
             raise CompressError("本地原始备份副本丢失，已跳过")
         target = _backup_target(backup_dir, pair.mp4)
         _backup_verified(source_local, target, src.original_md5)
+        _set_item_progress(state, item, 0.25, "传输中")
         with state.lock:
             item.backup = _rel_to_backup(target)
             item.original_size = src.original_size
@@ -880,6 +928,7 @@ def _apply_one(
                 mtime,
                 mode=mode,
             )
+            _set_item_progress(state, item, 0.92, "校验中")
             # The backup holds the only needed copy now; the job source is
             # either a hard link to it or a redundant copy. The encoded
             # output also lives on the phone, so drop both to save space.
@@ -899,6 +948,8 @@ def _apply_one(
             state.update_scan_size(pair.mp4, src.compressed_size)
             pair.size = src.compressed_size
             item.status = "applied"
+            item.progress = 1.0
+            item.phase = ""
             src.status = "applied"
             src.backup = item.backup
             manifest_rows.append(
@@ -930,13 +981,17 @@ def _apply_one(
         with state.lock:
             item.status = "error"
             item.reason = str(exc)
+            item.progress = 1.0
     except Exception as exc:  # keep one bad file from aborting a batch
         with state.lock:
             item.status = "error"
             item.reason = f"{type(exc).__name__}: {exc}"
+            item.progress = 1.0
     finally:
         with state.lock:
             item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            if item.status in TERMINAL_ITEM_STATUSES:
+                item.progress = 1.0
             job.done += 1
 
 
@@ -1163,6 +1218,8 @@ def _item_payload(item: ItemResult) -> Dict:
         "elapsed_ms": item.elapsed_ms,
         "crf_used": item.crf_used,
         "speed_used": item.speed_used,
+        "progress": round(max(0.0, min(1.0, item.progress)), 4),
+        "phase": item.phase,
     }
 
 
@@ -1173,6 +1230,7 @@ def _job_payload(job: Job) -> Dict:
         "status": job.status,
         "total": job.total,
         "done": job.done,
+        "progress": round(_job_progress(job), 4),
         "message": job.message,
         "error": job.error,
         "created_at": job.created_at,
@@ -1386,6 +1444,102 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
+    def _stream_job(self, job_id: str) -> None:
+        job = self.state.jobs.get(job_id)
+        if job is None:
+            self._error(404, "任务不存在")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        last = None
+        last_sent = 0.0
+        while True:
+            with self.state.lock:
+                payload = {
+                    "id": job.id,
+                    "status": job.status,
+                    "done": job.done,
+                    "total": job.total,
+                    "progress": round(_job_progress(job), 4),
+                    "message": job.message,
+                    "error": job.error,
+                    "finished_at": job.finished_at,
+                }
+            signature = (
+                payload["status"],
+                payload["done"],
+                payload["progress"],
+                payload["message"],
+                payload["error"],
+            )
+            now = time.monotonic()
+            if signature != last or now - last_sent >= 1.0:
+                data = (
+                    "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+                ).encode("utf-8")
+                try:
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
+                last = signature
+                last_sent = now
+            if payload["status"] != "running":
+                return
+            time.sleep(0.1)
+
+    def _serve_phone_video(self, remote: str) -> None:
+        pair = self.state.pairs_by_mp4.get(remote)
+        if pair is None:
+            raise BadRequest("不在实况照片配对清单中")
+        cache_dir = state_dir() / "studio" / "videos"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        name = f"{_safe_sha1(remote)[:16]}-{pair.size}.mp4"
+        target = cache_dir / name
+        if not target.exists():
+            temp = cache_dir / f".{name}.part-{secrets.token_hex(3)}"
+            try:
+                with self.state.adb_lock:
+                    pulled = self.state.adb.pull(remote, str(temp))
+                if not pulled:
+                    raise CompressError("从手机拉取视频失败")
+                os.replace(temp, target)
+                cache_limit = 2 * 1024 * 1024 * 1024
+                try:
+                    cached = sorted(
+                        (
+                            entry
+                            for entry in cache_dir.iterdir()
+                            if entry.suffix == ".mp4" and not entry.name.startswith(".")
+                        ),
+                        key=lambda entry: entry.stat().st_mtime,
+                    )
+                except OSError:
+                    cached = []
+                total_bytes = 0
+                for entry in cached:
+                    with contextlib.suppress(OSError):
+                        total_bytes += entry.stat().st_size
+                for entry in cached:
+                    if total_bytes <= cache_limit:
+                        break
+                    with contextlib.suppress(OSError):
+                        size = entry.stat().st_size
+                        entry.unlink()
+                        total_bytes -= size
+            finally:
+                with contextlib.suppress(OSError):
+                    if temp.exists():
+                        temp.unlink()
+        self._send_file(target, "video/mp4", "private, max-age=600")
+
     # --------------------------------------------------------------------- GET
     def do_HEAD(self) -> None:
         self.do_GET()
@@ -1513,6 +1667,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return
             self._send_file(thumb, "image/jpeg", "private, max-age=86400")
             return
+        if path.startswith("/api/jobs/") and path.endswith("/events"):
+            job_id = path[len("/api/jobs/") : -len("/events")]
+            self._stream_job(job_id)
+            return
         if path.startswith("/api/jobs/"):
             job_id = path[len("/api/jobs/") :]
             job = self.state.jobs.get(job_id)
@@ -1521,6 +1679,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return
             with self.state.lock:
                 self._send_json(_job_payload(job))
+            return
+        if path == "/api/media":
+            remote = (query.get("path") or [""])[0]
+            self._serve_phone_video(remote)
             return
         if path == "/api/preview":
             job_id = (query.get("job") or [""])[0]
@@ -1706,6 +1868,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             if skip_reason:
                 item.status = "skipped"
                 item.reason = skip_reason
+                item.progress = 1.0
             else:
                 total_bytes += pair.size
             items.append(item)
@@ -1922,6 +2085,15 @@ def serve(args) -> int:
     model = props.get("ro.product.model", "") or props.get("ro.product.vendor.model", "")
     android = props.get("ro.build.version.release", "")
     hardware_encoder = detect_hardware_encoder(getattr(args, "ffmpeg", "ffmpeg"))
+    requested_workers = int(getattr(args, "workers", 0) or 0)
+    if requested_workers > 0:
+        workers = max(1, min(requested_workers, 8))
+    elif hardware_encoder and (os.cpu_count() or 0) >= 12:
+        # Base M-series media engines keep scaling until ~6 in-flight jobs;
+        # more only adds contention. 12+ CPU cores (M6 class) gets 6.
+        workers = 6
+    else:
+        workers = 3
     token = secrets.token_urlsafe(32)
     port = int(getattr(args, "port", 8765))
     state = StudioState(
@@ -1936,7 +2108,7 @@ def serve(args) -> int:
         ffprobe=getattr(args, "ffprobe", "ffprobe"),
         max_duration=getattr(args, "max_duration", 5000),
         include_unknown=getattr(args, "include_unknown", False),
-        workers=max(1, min(int(getattr(args, "workers", 3)), 8)),
+        workers=workers,
         apply_workers=max(1, min(int(getattr(args, "apply_workers", 4)), 4)),
         hardware_encoder=hardware_encoder,
         history=_load_history(),
