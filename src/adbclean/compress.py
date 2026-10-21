@@ -90,6 +90,10 @@ class NoBenefit(CompressError):
     """The re-encoded file is not smaller than the original."""
 
 
+class HardwareEncoderError(CompressError):
+    """VideoToolbox refused to open an encoder session."""
+
+
 @dataclass(frozen=True)
 class Preset:
     key: str
@@ -195,6 +199,7 @@ class VideoInfo:
     color_primaries: str
     rotation: int
     bit_depth: int
+    frame_rate: float
     has_video: bool
     has_audio: bool
     audio_codec: str
@@ -218,6 +223,9 @@ class CompressResult:
     duration: float
     uuid_preserved: bool
     audio_reencoded: bool = False
+    speed_used: str = "slow"
+    hardware_quality_used: Optional[int] = None
+    fallback_note: str = ""
 
 
 def _as_int(value, default: int = 0) -> int:
@@ -232,6 +240,19 @@ def _as_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _parse_rate(value) -> float:
+    text = str(value or "")
+    if "/" in text:
+        numerator, denominator = text.split("/", 1)
+        try:
+            num = float(numerator)
+            den = float(denominator)
+        except ValueError:
+            return 0.0
+        return num / den if den else 0.0
+    return _as_float(text)
 
 
 def _stream_tags(stream: dict) -> Dict[str, str]:
@@ -299,6 +320,8 @@ def parse_probe_json(payload: Dict) -> VideoInfo:
         color_primaries=str(video.get("color_primaries") or ""),
         rotation=rotation,
         bit_depth=_bit_depth(pix_fmt),
+        frame_rate=_parse_rate(video.get("avg_frame_rate"))
+        or _parse_rate(video.get("r_frame_rate")),
         has_video=True,
         has_audio=audio is not None,
         audio_codec=str((audio or {}).get("codec_name") or ""),
@@ -355,8 +378,17 @@ def _safe(value: str, allowed: frozenset, fallback: str = "") -> str:
 
 
 def _level(info: VideoInfo) -> Optional[str]:
-    longest = max(info.width, info.height, info.display_width, info.display_height)
-    if longest <= 1920:
+    """Return level 4.0 only when the stream actually fits level 4.0.
+
+    H.264 level is constrained by macroblocks per frame and per second, not
+    just the longest edge. 1728x1296@30, for example, exceeds level 4.0.
+    """
+    width_mbs = (info.width + 15) // 16
+    height_mbs = (info.height + 15) // 16
+    frame_mbs = width_mbs * height_mbs
+    if info.frame_rate <= 0:
+        return None
+    if frame_mbs <= 8192 and frame_mbs * info.frame_rate <= 245760:
         return "4.0"
     return None
 
@@ -375,6 +407,7 @@ def build_encode_command(
     info: VideoInfo,
     ffmpeg: str = "ffmpeg",
     speed: str = "slow",
+    hardware_q: Optional[int] = None,
 ) -> List[str]:
     """Build the ffmpeg argv. Pure function, no side effects."""
     speed = resolve_speed(speed)
@@ -392,10 +425,13 @@ def build_encode_command(
     if preset.mode == "copy":
         command.extend(["-c", "copy"])
     else:
+        # H.264 4:2:0 requires even dimensions. Cropped videos can be odd;
+        # trim at most one pixel instead of resizing or changing the aspect.
+        if info.width % 2 or info.height % 2:
+            command.extend(["-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2"])
         if speed == "hardware":
-            command.extend(
-                ["-c:v", "h264_videotoolbox", "-q:v", str(hardware_quality(preset.crf))]
-            )
+            quality = hardware_q if hardware_q is not None else hardware_quality(preset.crf)
+            command.extend(["-c:v", "h264_videotoolbox", "-q:v", str(quality)])
         else:
             command.extend(["-c:v", "libx264", "-preset", speed, "-crf", str(preset.crf)])
         pix_fmt = info.pix_fmt if info.pix_fmt in SAFE_PIX_FMTS else "yuv420p"
@@ -466,13 +502,16 @@ def encode_video(
     ffmpeg: str = "ffmpeg",
     timeout: int = 900,
     speed: str = "slow",
+    hardware_q: Optional[int] = None,
 ) -> bool:
     """Encode src to dst. Returns True when audio had to be re-encoded."""
-    command = build_encode_command(src, dst, preset, info, ffmpeg, speed)
+    command = build_encode_command(src, dst, preset, info, ffmpeg, speed, hardware_q)
     result = _run(command, timeout)
     if result.returncode == 0:
         return False
     stderr = result.stderr.decode("utf-8", "replace").strip()
+    if speed == "hardware" and _looks_like_hardware_failure(stderr):
+        raise HardwareEncoderError(stderr or "VideoToolbox 无法初始化编码器")
     audio_copy_failed = (
         info.has_audio
         and preset.mode != "copy"
@@ -495,6 +534,17 @@ def encode_video(
 def _looks_like_audio_failure(stderr: str) -> bool:
     text = stderr.lower()
     markers = ("audio", "codec", "encoder", "stream")
+    return any(marker in text for marker in markers)
+
+
+def _looks_like_hardware_failure(stderr: str) -> bool:
+    text = stderr.lower()
+    markers = (
+        "h264_videotoolbox",
+        "cannot prepare encoder",
+        "error while opening encoder",
+        "-12902",
+    )
     return any(marker in text for marker in markers)
 
 
@@ -616,7 +666,12 @@ def compress_file(
     require_vivo_uuid: bool = True,
     speed: str = "slow",
 ) -> CompressResult:
-    """Compress one MP4 into ``dst``; never modifies ``src``."""
+    """Compress one MP4 into ``dst``; never modifies ``src``.
+
+    Hardware sessions can fail under resource pressure or unusual frame
+    geometry; retry once in software. If the chosen quality would grow the
+    file, hardware quality is lowered step by step before giving up.
+    """
     info = probe_video(src, ffprobe)
     reason = hdr_reason(info)
     if reason:
@@ -632,21 +687,70 @@ def compress_file(
     fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".adbclean-", suffix=".mp4")
     os.close(fd)
     audio_reencoded = False
+    used_speed = speed
+    used_q: Optional[int] = None
+    fallback_notes: List[str] = []
+    quality_note = ""
+
+    if preset.mode == "copy":
+        attempts = [(speed, None)]
+    elif speed == "hardware":
+        base_q = hardware_quality(preset.crf)
+        attempts = [("hardware", None)]
+        attempts.extend(("hardware", q) for q in (50, 45) if q < base_q)
+    else:
+        attempts = [(speed, None)]
+
+    ssim: Optional[float] = None
     try:
-        audio_reencoded = encode_video(
-            src, temp_path, preset, info, ffmpeg, timeout, speed=speed
-        )
-        if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
-            raise NoVivoUuid("原 MP4 没有 vivoMediaExtInfo uuid box，可能不是 vivo 实况照片")
-        if not require_vivo_uuid:
-            append_vivo_uuid_box(src, temp_path)
-        verify_decodable(temp_path, ffmpeg, timeout)
-        compressed_size = os.path.getsize(temp_path)
-        if preset.mode != "copy" and not is_profitable(original_size, compressed_size):
-            raise NoBenefit(
-                f"压缩后没有变小（{original_size} → {compressed_size} 字节），已放弃"
-            )
-        ssim = None
+        index = 0
+        while index < len(attempts):
+            attempt_speed, attempt_q = attempts[index]
+            try:
+                audio_reencoded = encode_video(
+                    src,
+                    temp_path,
+                    preset,
+                    info,
+                    ffmpeg,
+                    timeout,
+                    speed=attempt_speed,
+                    hardware_q=attempt_q,
+                )
+            except HardwareEncoderError:
+                if attempt_speed == "hardware":
+                    used_speed = "veryfast"
+                    attempts = [("veryfast", None)]
+                    index = 0
+                    fallback_notes.append("硬件编码初始化失败，已回退软件 veryfast")
+                    continue
+                raise
+
+            if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
+                raise NoVivoUuid(
+                    "原 MP4 没有 vivoMediaExtInfo uuid box，可能不是 vivo 实况照片"
+                )
+            if not require_vivo_uuid:
+                append_vivo_uuid_box(src, temp_path)
+            verify_decodable(temp_path, ffmpeg, timeout)
+            compressed_size = os.path.getsize(temp_path)
+            if preset.mode == "copy" or is_profitable(original_size, compressed_size):
+                used_speed = attempt_speed
+                used_q = attempt_q
+                break
+
+            index += 1
+            if index >= len(attempts):
+                raise NoBenefit(
+                    f"压缩后没有变小（{original_size} → {compressed_size} 字节），已放弃"
+                )
+            next_q = attempts[index][1]
+            quality_note = f"当前质量收益不足，已自动降到 q{next_q}"
+
+        if quality_note:
+            fallback_notes.append(quality_note)
+        if (info.width % 2 or info.height % 2) and preset.mode != "copy":
+            fallback_notes.append("奇数分辨率已裁掉 1 像素")
         if compute_ssim:
             ssim = measure_ssim(src, temp_path, ffmpeg, timeout)
         os.replace(temp_path, dst)
@@ -665,8 +769,10 @@ def compress_file(
         duration=info.duration,
         uuid_preserved=extract_vivo_uuid_box(dst) is not None,
         audio_reencoded=audio_reencoded,
+        speed_used=used_speed,
+        hardware_quality_used=used_q,
+        fallback_note="；".join(fallback_notes),
     )
-
 
 def find_tool(name: str) -> Optional[str]:
     return shutil.which(name)

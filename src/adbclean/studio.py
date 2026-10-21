@@ -696,7 +696,12 @@ def _compress_one(
             item.mtime = remote_mtime
             item.duration_ms = pair.duration_ms
             item.status = "ready"
-            item.reason = "音频已重编码" if result.audio_reencoded else ""
+            reasons = []
+            if result.fallback_note:
+                reasons.append(result.fallback_note)
+            if result.audio_reencoded:
+                reasons.append("音频已重编码")
+            item.reason = "；".join(reasons)
     except (HdrUnsupported, UnsupportedFormat, NoVivoUuid, NoBenefit) as exc:
         with state.lock:
             item.status = "skipped"

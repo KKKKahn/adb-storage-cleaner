@@ -10,6 +10,7 @@ from adbclean.compress import (
     HdrUnsupported,
     NoBenefit,
     VideoInfo,
+    _looks_like_hardware_failure,
     append_vivo_uuid_box,
     build_encode_command,
     compress_file,
@@ -40,6 +41,7 @@ def info(**overrides):
         color_primaries="smpte432",
         rotation=0,
         bit_depth=8,
+        frame_rate=30.0,
         has_video=True,
         has_audio=True,
         audio_codec="aac",
@@ -69,6 +71,7 @@ def probe_payload(**overrides):
         "color_primaries": "smpte432",
         "time_base": "1/90000",
         "duration": "2.206125",
+        "avg_frame_rate": "30/1",
         "tags": {"handler_name": "VideoHandle"},
     }
     audio = {"codec_type": "audio", "codec_name": "aac", "tags": {"handler_name": "SoundHandle"}}
@@ -197,6 +200,47 @@ def test_build_encode_command_omits_level_for_4k():
         "in.mp4", "out.mp4", PRESETS["balanced"], video_info(width=3840, height=2160)
     )
     assert "-level" not in command
+
+
+def test_build_encode_command_omits_invalid_level_for_1728x1296():
+    command = build_encode_command(
+        "in.mp4",
+        "out.mp4",
+        PRESETS["balanced"],
+        video_info(width=1728, height=1296, display_width=1728, display_height=1296),
+    )
+    assert "-level" not in command
+
+
+def test_build_encode_command_omits_level_for_1080p60():
+    command = build_encode_command(
+        "in.mp4", "out.mp4", PRESETS["balanced"], video_info(frame_rate=60.0)
+    )
+    assert "-level" not in command
+
+
+def test_build_encode_command_crops_odd_dimensions_only():
+    odd = build_encode_command(
+        "in.mp4",
+        "out.mp4",
+        PRESETS["balanced"],
+        video_info(width=1727, height=1295, display_width=1727, display_height=1295),
+    )
+    assert "-vf" in odd
+    assert "crop=trunc(iw/2)*2:trunc(ih/2)*2" in odd
+    even = build_encode_command(
+        "in.mp4",
+        "out.mp4",
+        PRESETS["balanced"],
+        video_info(width=1728, height=1296, display_width=1728, display_height=1296),
+    )
+    assert "-vf" not in even
+
+
+def test_detects_videotoolbox_failure():
+    assert _looks_like_hardware_failure("Error: cannot prepare encoder: -12902")
+    assert _looks_like_hardware_failure("[h264_videotoolbox @ 0x1] Error while opening encoder")
+    assert not _looks_like_hardware_failure("Invalid data found when processing input")
 
 
 def test_build_encode_command_for_rotated_portrait():

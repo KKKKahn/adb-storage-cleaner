@@ -14,6 +14,7 @@
 - 实测 uuid box 大小有 359 B 和 493 B 两种，代码按原字节复制，不做假设。
 - ffmpeg 7.1.1 / ffprobe 7.1.1 验证通过；更低版本未测试。
 - macOS VideoToolbox 硬件编码已在 vivo 真机 样本上真机验证：动态效果和颜色正常；输出 `color_space` 标记为 smpte170m（与 bt470bg 同为 601 矩阵），实际观看无异常。
+- 4:3（1728×1296@30fps）已批量回归 19/19 成功；level 按宏块/帧率计算，不缩放、不改变宽高比。奇数宽高只裁掉最多 1 像素。
 - 硬件编码仅 macOS 可用；Windows/Linux 默认回退到 libx264 veryfast。
 - HDR、10-bit、BT.2020、4K、HEVC 尚未在真机验证，当前默认跳过。
 - 其他厂商的实况照片机制（小米、OPPO、三星等）未验证；Studio 只识别 `IMG_YYYYMMDD_HHMMSS.jpg + .mp4` 这一种命名。
