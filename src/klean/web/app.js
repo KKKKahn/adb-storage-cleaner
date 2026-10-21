@@ -828,7 +828,9 @@ function makeCard(photo) {
     card.classList.add('is-compressed');
     const badge = document.createElement('span');
     badge.className = 'compressed-badge';
-    badge.textContent = '✓';
+    const badgeBolt = document.createElement('span');
+    badgeBolt.className = 'bolt';
+    badge.appendChild(badgeBolt);
     badge.setAttribute('aria-label', '已压缩');
     badge.title = '已压缩' + (photo.history_crf ? '（CRF' + photo.history_crf + '）' : '') +
       (photo.history_size ? ' · ' + formatBytes(photo.history_size) : '');
