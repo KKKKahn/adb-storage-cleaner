@@ -580,6 +580,16 @@ button { cursor: pointer; }
 }
 .field input { min-width: 76px; width: 76px; }
 .field select:focus, .field input:focus { border-color: var(--accent); }
+.field select:disabled { opacity: 0.5; cursor: not-allowed; }
+.check-field {
+  display: flex; align-items: center; gap: 6px;
+  padding-bottom: 8px;
+  font-size: 11px; color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.check-field input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
 
 /* ---------------------------------------------------------------- panel */
 .panel {

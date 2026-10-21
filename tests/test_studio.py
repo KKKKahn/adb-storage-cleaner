@@ -453,6 +453,19 @@ def test_item_result_defaults():
     assert item.original_md5 == ""
 
 
+def test_compress_job_cancelled_skips_items(tmp_path, monkeypatch):
+    import adbclean.studio as studio
+
+    monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
+    state = make_state()
+    job = Job(id="cancel1", kind="compress", total=1, cancel_requested=True)
+    job.items = [ItemResult("/sdcard/a.mp4", "/sdcard/a.jpg", "2026-01-02", "03:04:05")]
+    _compress_job(state, job, PRESETS["balanced"], "veryfast", False)
+    assert job.done == 1
+    assert job.items[0].status == "skipped"
+    assert "停止" in job.items[0].reason
+
+
 def test_compress_job_marks_unknown_pair_as_error(tmp_path, monkeypatch):
     import adbclean.studio as studio
 

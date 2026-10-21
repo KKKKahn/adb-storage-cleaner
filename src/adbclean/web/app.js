@@ -10,6 +10,12 @@ const EST_RATIO = {
   lossless: 1.0,
   custom: 0.44,
 };
+const SPEED_LABELS = {
+  hardware: '硬件加速',
+  veryfast: '快',
+  medium: '均衡',
+  slow: '最小体积',
+};
 
 const state = {
   summary: null,
@@ -38,6 +44,7 @@ const state = {
   clearedSessions: new Set(),
   viewToken: 0,
   starting: false,
+  speedInitialized: false,
   busy: false,
   ffmpegOk: true,
   spaceOk: true,
@@ -156,6 +163,18 @@ async function loadSummary() {
   $('total-size').textContent = formatBytes(summary.totals.bytes);
   $('backup-size').textContent = formatBytes(summary.backup_bytes);
   state.ffmpegOk = Boolean(summary.ffmpeg && summary.ffmpeg.ok);
+  const speedSelect = $('speed-select');
+  const hardwareOption = speedSelect.querySelector('option[value="hardware"]');
+  if (summary.hardware && summary.hardware.ok) {
+    if (!state.speedInitialized) {
+      speedSelect.value = 'hardware';
+      state.speedInitialized = true;
+    }
+  } else {
+    if (hardwareOption) hardwareOption.remove();
+    if (speedSelect.value === 'hardware') speedSelect.value = 'veryfast';
+    state.speedInitialized = true;
+  }
   let notice = null;
   if (!state.ffmpegOk) {
     notice = { message: '未找到 ffmpeg/ffprobe，压缩功能不可用。安装后重启：brew install ffmpeg', tone: 'err' };
@@ -1187,10 +1206,14 @@ function buildResultRow(item, job) {
     const pct = item.original_size ? Math.round(saved * 100 / item.original_size) : 0;
     numbers.textContent = formatBytes(item.original_size) + ' → ' +
       formatBytes(item.compressed_size) + ' · 省 ' + pct + '%';
-    if (item.ssim) {
-      const ssim = document.createElement('div');
-      ssim.textContent = 'SSIM ' + item.ssim.toFixed(4);
-      numbers.appendChild(ssim);
+    const detail = [];
+    if (item.ssim) detail.push('SSIM ' + item.ssim.toFixed(4));
+    if (item.elapsed_ms) detail.push('耗时 ' + (item.elapsed_ms / 1000).toFixed(1) + 's');
+    if (detail.length) {
+      const extra = document.createElement('div');
+      extra.className = 'r-ssim';
+      extra.textContent = detail.join(' · ');
+      numbers.appendChild(extra);
     }
   } else if (item.original_size) {
     numbers.textContent = formatBytes(item.original_size);
@@ -1212,13 +1235,23 @@ function buildResultRow(item, job) {
 }
 
 function renderJobActions(job) {
-  const signature = job.id + ':' + job.status + ':' + job.items.map(function (item) {
-    return item.status;
-  }).join('');
+  const signature = job.id + ':' + job.status + ':' +
+    (job.cancel_requested ? '1' : '0') + ':' +
+    job.items.map(function (item) { return item.status; }).join('');
   if (signature === state.actionsSignature) return;
   state.actionsSignature = signature;
   const actions = $('job-actions');
   actions.textContent = '';
+
+  if (job.kind === 'compress' && job.status === 'running') {
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.className = 'ghost danger-btn';
+    stop.textContent = job.cancel_requested ? '正在停止…' : '停止任务';
+    stop.disabled = Boolean(job.cancel_requested);
+    stop.addEventListener('click', function () { cancelJob(job.id); });
+    actions.appendChild(stop);
+  }
 
   if (job.kind === 'compress' && job.status === 'done') {
     const ready = job.items.filter(function (item) { return item.status === 'ready'; });
@@ -1285,6 +1318,24 @@ function renderJobActions(job) {
       await reloadView();
     });
     actions.appendChild(button);
+  }
+}
+
+async function cancelJob(jobId) {
+  try {
+    await api('/api/jobs/' + encodeURIComponent(jobId) + '/cancel', {
+      method: 'POST',
+      body: '{}',
+    });
+    if (state.job) {
+      state.job.cancel_requested = true;
+      state.job.message = '正在停止，等待当前文件结束…';
+      state.actionsSignature = '';
+      renderJobActions(state.job);
+    }
+    toast('已请求停止；当前文件结束后不会再开始新文件');
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -1377,12 +1428,16 @@ async function compressSelected() {
   }
   const bytes = photos.reduce(function (sum, photo) { return sum + photo.size; }, 0);
   const ratio = EST_RATIO[preset] || 0.44;
+  const speed = $('speed-select').value;
+  const computeSsim = $('ssim-toggle').checked;
   const estimate = preset === 'lossless'
     ? '无损重封装体积几乎不变。'
     : '预计压缩后约 ' + formatBytes(bytes * ratio) + '（估算）。';
   const ok = await confirmDialog('开始压缩？', [
     '将压缩 ' + photos.length + ' 个伴生 MP4，原始体积 ' + formatBytes(bytes) + '。',
     estimate,
+    '编码速度：' + (SPEED_LABELS[speed] || speed) +
+      ' · SSIM：' + (computeSsim ? '计算' : '跳过'),
     '只处理 MP4，JPG 定格画面不会改动。',
     '压缩结果先保存在本机，预览确认后再应用到手机。',
     photos.length > 100 ? '批量较大，可能需要较长时间，建议分批处理。' : '',
@@ -1393,7 +1448,13 @@ async function compressSelected() {
   try {
     const data = await api('/api/compress', {
       method: 'POST',
-      body: JSON.stringify({ paths: photos.map(function (photo) { return photo.mp4; }), preset: preset, crf: crf }),
+      body: JSON.stringify({
+        paths: photos.map(function (photo) { return photo.mp4; }),
+        preset: preset,
+        crf: crf,
+        speed: speed,
+        compute_ssim: computeSsim,
+      }),
     });
     state.uncheckedResults = new Set();
     showJob(data.job_id, 'compress');
@@ -1794,6 +1855,7 @@ function bindEvents() {
   $('select-scope-btn').addEventListener('click', toggleDisplayedScope);
   $('preset').addEventListener('change', function () {
     $('crf-field').classList.toggle('hidden', $('preset').value !== 'custom');
+    $('speed-select').disabled = $('preset').value === 'lossless';
     updateSelectionUI();
   });
   $('crf').addEventListener('input', updateSelectionUI);

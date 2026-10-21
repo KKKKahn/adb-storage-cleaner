@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="adbclean-token" content="__ADBCLEAN_TOKEN__">
 <title>adbclean Studio · 实况照片压缩</title>
-<link rel="stylesheet" href="/static/style.css?v=0.2.0.1">
+<link rel="stylesheet" href="/static/style.css?v=0.2.1-2">
 </head>
 <body>
 <header class="topbar">
@@ -126,9 +126,22 @@
         <option value="lossless">无损重封装（体积几乎不变）</option>
       </select>
     </label>
+    <label class="field">
+      <span>编码速度</span>
+      <select id="speed-select">
+        <option value="hardware">硬件加速（最快）</option>
+        <option value="veryfast" selected>快（推荐）</option>
+        <option value="medium">均衡</option>
+        <option value="slow">最小体积（慢）</option>
+      </select>
+    </label>
     <label class="field hidden" id="crf-field">
       <span>CRF</span>
       <input id="crf" type="number" min="14" max="30" value="20">
+    </label>
+    <label class="check-field" title="SSIM 需要额外解码两段视频，会明显变慢">
+      <input id="ssim-toggle" type="checkbox">
+      <span>计算 SSIM（慢）</span>
     </label>
     <button id="compress-btn" class="primary" type="button" disabled>压缩所选</button>
   </div>
@@ -173,6 +186,6 @@
 
 <div id="toast" class="toast hidden" role="status"></div>
 
-<script src="/static/app.js?v=0.2.0.1"></script>
+<script src="/static/app.js?v=0.2.1-2"></script>
 </body>
 </html>

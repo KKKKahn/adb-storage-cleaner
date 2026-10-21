@@ -111,10 +111,51 @@ PRESETS: Dict[str, Preset] = {
 }
 PRESET_ORDER = ["visually_lossless", "balanced", "small", "lossless"]
 
+SPEED_LABELS = {
+    "hardware": "硬件加速",
+    "veryfast": "快",
+    "medium": "均衡",
+    "slow": "最小体积",
+}
+SPEED_ORDER = ["hardware", "veryfast", "medium", "slow"]
+
 CUSTOM_CRF_MIN = 1
 CUSTOM_CRF_MAX = 51
 UI_CRF_MIN = 14
 UI_CRF_MAX = 30
+
+
+def resolve_speed(value: str) -> str:
+    if value not in SPEED_LABELS:
+        raise ValueError(f"未知编码速度: {value}")
+    return value
+
+
+def hardware_quality(crf: Optional[int]) -> int:
+    """Map the software CRF tier to a VideoToolbox quality level."""
+    if crf is None:
+        return 60
+    if crf <= 18:
+        return 65
+    if crf <= 21:
+        return 60
+    if crf <= 24:
+        return 50
+    return 45
+
+
+def detect_hardware_encoder(ffmpeg: str = "ffmpeg", timeout: int = 15) -> str:
+    """Return a supported Apple hardware H.264 encoder, or an empty string."""
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return "h264_videotoolbox" if b"h264_videotoolbox" in result.stdout else ""
 
 
 def resolve_preset(key: str, crf: Optional[int] = None) -> Preset:
@@ -333,8 +374,10 @@ def build_encode_command(
     preset: Preset,
     info: VideoInfo,
     ffmpeg: str = "ffmpeg",
+    speed: str = "slow",
 ) -> List[str]:
     """Build the ffmpeg argv. Pure function, no side effects."""
+    speed = resolve_speed(speed)
     command = [
         ffmpeg,
         "-hide_banner",
@@ -349,7 +392,12 @@ def build_encode_command(
     if preset.mode == "copy":
         command.extend(["-c", "copy"])
     else:
-        command.extend(["-c:v", "libx264", "-preset", "slow", "-crf", str(preset.crf)])
+        if speed == "hardware":
+            command.extend(
+                ["-c:v", "h264_videotoolbox", "-q:v", str(hardware_quality(preset.crf))]
+            )
+        else:
+            command.extend(["-c:v", "libx264", "-preset", speed, "-crf", str(preset.crf)])
         pix_fmt = info.pix_fmt if info.pix_fmt in SAFE_PIX_FMTS else "yuv420p"
         command.extend(["-pix_fmt", pix_fmt])
         command.extend(["-profile:v", "high"])
@@ -417,9 +465,10 @@ def encode_video(
     info: VideoInfo,
     ffmpeg: str = "ffmpeg",
     timeout: int = 900,
+    speed: str = "slow",
 ) -> bool:
     """Encode src to dst. Returns True when audio had to be re-encoded."""
-    command = build_encode_command(src, dst, preset, info, ffmpeg)
+    command = build_encode_command(src, dst, preset, info, ffmpeg, speed)
     result = _run(command, timeout)
     if result.returncode == 0:
         return False
@@ -565,6 +614,7 @@ def compress_file(
     timeout: int = 900,
     compute_ssim: bool = True,
     require_vivo_uuid: bool = True,
+    speed: str = "slow",
 ) -> CompressResult:
     """Compress one MP4 into ``dst``; never modifies ``src``."""
     info = probe_video(src, ffprobe)
@@ -583,7 +633,9 @@ def compress_file(
     os.close(fd)
     audio_reencoded = False
     try:
-        audio_reencoded = encode_video(src, temp_path, preset, info, ffmpeg, timeout)
+        audio_reencoded = encode_video(
+            src, temp_path, preset, info, ffmpeg, timeout, speed=speed
+        )
         if require_vivo_uuid and not append_vivo_uuid_box(src, temp_path):
             raise NoVivoUuid("原 MP4 没有 vivoMediaExtInfo uuid box，可能不是 vivo 实况照片")
         if not require_vivo_uuid:

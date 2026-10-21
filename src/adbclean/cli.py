@@ -146,6 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg 路径（默认 ffmpeg）")
     p.add_argument("--ffprobe", default="ffprobe", help="ffprobe 路径（默认 ffprobe）")
+    p.add_argument("--workers", type=int, default=3, help="并行压缩数（默认 3，范围 1–8）")
+    p.add_argument(
+        "--apply-workers", type=int, default=4, help="并行应用数（默认 4，范围 1–4）"
+    )
     p.set_defaults(func=cmd_studio)
 
     p = sub.add_parser("all", parents=[common], help="扫描 + 报告 + 清理建议（只读）")

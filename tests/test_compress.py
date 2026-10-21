@@ -13,11 +13,14 @@ from adbclean.compress import (
     append_vivo_uuid_box,
     build_encode_command,
     compress_file,
+    detect_hardware_encoder,
     extract_vivo_uuid_box,
+    hardware_quality,
     hdr_reason,
     is_profitable,
     parse_probe_json,
     resolve_preset,
+    resolve_speed,
 )
 
 
@@ -158,6 +161,35 @@ def test_build_encode_command_keeps_vivo_compatible_flags():
     ):
         assert token in joined
     assert "-dn" in command and "-sn" in command
+
+
+def test_resolve_speed_and_command():
+    assert resolve_speed("veryfast") == "veryfast"
+    assert resolve_speed("hardware") == "hardware"
+    with pytest.raises(ValueError):
+        resolve_speed("ultrafast")
+    command = build_encode_command(
+        "in.mp4", "out.mp4", PRESETS["balanced"], video_info(), speed="veryfast"
+    )
+    assert command[command.index("-preset") + 1] == "veryfast"
+
+
+def test_hardware_quality_mapping():
+    assert hardware_quality(18) == 65
+    assert hardware_quality(20) == 60
+    assert hardware_quality(23) == 50
+    assert hardware_quality(30) == 45
+    assert hardware_quality(None) == 60
+
+
+def test_build_encode_command_hardware():
+    command = build_encode_command(
+        "in.mp4", "out.mp4", PRESETS["balanced"], video_info(), speed="hardware"
+    )
+    assert "h264_videotoolbox" in command
+    assert command[command.index("-q:v") + 1] == "60"
+    assert "-crf" not in command
+    assert "-preset" not in command
 
 
 def test_build_encode_command_omits_level_for_4k():
@@ -330,6 +362,44 @@ def test_compress_copy_mode_without_benefit_is_allowed(tmp_path):
         compute_ssim=False,
     )
     assert result.uuid_preserved is True
+
+
+HAS_VT = bool(FFMPEG) and b"h264_videotoolbox" in subprocess.run(
+    [FFMPEG, "-hide_banner", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+).stdout
+
+
+@pytest.mark.skipif(not HAS_VT, reason="h264_videotoolbox not available")
+def test_detect_hardware_encoder():
+    assert detect_hardware_encoder(FFMPEG) == "h264_videotoolbox"
+
+
+@pytest.mark.skipif(not HAS_VT, reason="h264_videotoolbox not available")
+def test_compress_file_hardware_end_to_end(tmp_path):
+    source = tmp_path / "src.mp4"
+    subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=640x480:rate=30:duration=1",
+            "-c:v", "libx264", "-b:v", "8M", "-pix_fmt", "yuv420p", str(source),
+        ],
+        check=True,
+    )
+    with open(source, "ab") as handle:
+        handle.write(make_uuid_box())
+    target = tmp_path / "out.mp4"
+    result = compress_file(
+        str(source),
+        str(target),
+        PRESETS["balanced"],
+        ffmpeg=FFMPEG,
+        ffprobe=FFPROBE,
+        speed="hardware",
+        compute_ssim=False,
+    )
+    assert result.uuid_preserved is True
+    assert target.exists()
+    assert extract_vivo_uuid_box(str(target)) == make_uuid_box()
 
 
 def test_compress_result_no_benefit_class_is_compress_error():

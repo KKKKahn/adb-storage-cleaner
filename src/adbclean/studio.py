@@ -18,8 +18,10 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 import urllib.parse
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +31,8 @@ from .adb import ADB, ADBError
 from .compress import (
     PRESET_ORDER,
     PRESETS,
+    SPEED_LABELS,
+    SPEED_ORDER,
     UI_CRF_MAX,
     UI_CRF_MIN,
     CompressError,
@@ -37,7 +41,9 @@ from .compress import (
     NoVivoUuid,
     UnsupportedFormat,
     compress_file,
+    detect_hardware_encoder,
     resolve_preset,
+    resolve_speed,
 )
 from .live import LivePair, find_pairs, load_durations, sh_quote
 from .scan import Scan, load_latest, save_scan, scan_device
@@ -81,6 +87,7 @@ class ItemResult:
     backup: str = ""
     mtime: int = 0
     duration_ms: Optional[int] = None
+    elapsed_ms: int = 0
 
 
 @dataclass
@@ -95,6 +102,7 @@ class Job:
     error: str = ""
     items: List[ItemResult] = field(default_factory=list)
     finished_at: str = ""
+    cancel_requested: bool = False
 
 
 @dataclass
@@ -110,6 +118,9 @@ class StudioState:
     ffprobe: str
     max_duration: int
     include_unknown: bool = False
+    workers: int = 3
+    apply_workers: int = 4
+    hardware_encoder: str = ""
     model: str = ""
     android: str = ""
     jobs: Dict[str, Job] = field(default_factory=dict)
@@ -550,30 +561,48 @@ def _push_replace(
     timeout: int = 600,
 ) -> None:
     temp = remote.rsplit("/", 1)[0] + "/." + remote.rsplit("/", 1)[-1] + ".adbclean.tmp"
-    with state.adb_lock:
-        if not state.adb.push(str(local), temp, timeout=timeout):
-            raise CompressError(f"push 失败: {remote}")
-        try:
-            pushed_md5 = state.adb.remote_md5(temp)
-            if pushed_md5 != expected_md5:
-                raise CompressError(
-                    f"手机端临时文件 MD5 不一致: {pushed_md5 or '读取失败'} != {expected_md5}"
-                )
-            state.adb.sh(
-                f"chmod {mode} {sh_quote(temp)}; touch -d @{mtime} {sh_quote(temp)}",
-                check=False,
+    quoted_temp = sh_quote(temp)
+    quoted_remote = sh_quote(remote)
+    if not state.adb.push(str(local), temp, timeout=timeout):
+        raise CompressError(f"push 失败: {remote}")
+    try:
+        pushed_md5 = state.adb.remote_md5(temp)
+        if pushed_md5 != expected_md5:
+            raise CompressError(
+                f"手机端临时文件 MD5 不一致: {pushed_md5 or '读取失败'} != {expected_md5}"
             )
-            state.adb.sh(f"mv -f {sh_quote(temp)} {sh_quote(remote)}")
-        except Exception:
-            state.adb.sh(f"rm -f {sh_quote(temp)}", check=False)
-            raise
-        final_md5 = state.adb.remote_md5(remote)
+        output = state.adb.sh(
+            f"chmod {mode} {quoted_temp}; touch -d @{mtime} {quoted_temp}; "
+            f"mv -f {quoted_temp} {quoted_remote}; "
+            f"md5sum {quoted_remote}; stat -c '%a %Y' {quoted_remote}; "
+            "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
+            f"-d {sh_quote('file://' + remote)} >/dev/null",
+            check=False,
+        )
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        hash_line = next(
+            (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)),
+            "",
+        )
+        stat_line = next(
+            (line for line in lines if re.fullmatch(r"\d+\s+\d+", line)),
+            "",
+        )
+        if not hash_line or not stat_line:
+            raise CompressError("替换后无法读取手机文件状态")
+        final_md5 = hash_line.split()[0].lower()
         if final_md5 != expected_md5:
             raise CompressError(
                 f"替换后 MD5 不一致: {final_md5 or '读取失败'} != {expected_md5}"
             )
-        state.adb.media_scan(remote)
-
+        final_mode, final_mtime = stat_line.split()
+        if final_mode != mode:
+            raise CompressError(f"替换后权限不一致: {final_mode} != {mode}")
+        if abs(int(final_mtime) - mtime) > 1:
+            raise CompressError(f"替换后 mtime 不一致: {final_mtime} != {mtime}")
+    except Exception:
+        state.adb.sh(f"rm -f {quoted_temp}", check=False)
+        raise
 
 def _restore_one(
     state: StudioState,
@@ -590,187 +619,294 @@ def _restore_one(
     _push_replace(state, backup_path, remote, expected_md5, mtime)
 
 
-def _compress_job(state: StudioState, job: Job, preset) -> None:
+def _compress_one(
+    state: StudioState,
+    job: Job,
+    item: ItemResult,
+    preset,
+    speed: str,
+    compute_ssim: bool,
+    src_dir: Path,
+    out_dir: Path,
+    directory: Path,
+) -> None:
+    started = time.monotonic()
+    if job.cancel_requested:
+        with state.lock:
+            item.status = "skipped"
+            item.reason = "用户已停止任务"
+            job.done += 1
+        return
+    with state.lock:
+        item.status = "running"
+    try:
+        pair = state.pairs_by_mp4.get(item.mp4)
+        if pair is None:
+            raise BadRequest("不在实况照片配对清单中")
+        if pair.duration_ms is not None and pair.duration_ms > state.max_duration:
+            raise CompressError(f"时长 {pair.duration_ms}ms 超过上限，已跳过")
+        free = shutil.disk_usage(str(state_dir())).free
+        if free < estimate_local_need(pair.size):
+            raise CompressError(
+                f"本机空间不足：需要约 {human(estimate_local_need(pair.size))}，"
+                f"当前可用 {human(free)}；请缩小批次"
+            )
+        local_src = src_dir / (_safe_sha1(pair.mp4)[:12] + "-" + pair.mp4.rsplit("/", 1)[-1])
+        with state.adb_lock:
+            probe = state.adb.sh(
+                f"stat -c '%s %Y' {sh_quote(pair.mp4)}; "
+                f"[ -f {sh_quote(pair.jpg)} ] && echo JPG_OK",
+                check=False,
+            )
+            lines = [line.strip() for line in probe.splitlines() if line.strip()]
+            if "JPG_OK" not in lines:
+                raise CompressError("同名 JPG 不存在，已跳过")
+            stat_line = next((line for line in lines if line != "JPG_OK"), "")
+            parts = stat_line.split()
+            if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                raise CompressError("无法读取手机文件信息，已跳过")
+            remote_size = int(parts[0])
+            remote_mtime = int(parts[1])
+            state.adb.pull(pair.mp4, str(local_src))
+        local_size = local_src.stat().st_size if local_src.exists() else 0
+        if not local_size:
+            raise CompressError("adb pull 失败")
+        if remote_size != local_size:
+            raise CompressError(f"拉取大小不一致 {local_size} != {remote_size}")
+        original_md5 = _local_md5(local_src)
+        local_out = out_dir / (_safe_sha1(pair.mp4)[:12] + "-" + pair.mp4.rsplit("/", 1)[-1])
+        result = compress_file(
+            str(local_src),
+            str(local_out),
+            preset,
+            ffmpeg=state.ffmpeg,
+            ffprobe=state.ffprobe,
+            compute_ssim=compute_ssim,
+            speed=speed,
+        )
+        compressed_md5 = _local_md5(local_out)
+        with state.lock:
+            item.original_size = result.original_size
+            item.compressed_size = result.compressed_size
+            item.ssim = result.ssim
+            item.original_md5 = original_md5
+            item.compressed_md5 = compressed_md5
+            item.output = local_out.relative_to(directory).as_posix()
+            item.source = local_src.relative_to(directory).as_posix()
+            item.mtime = remote_mtime
+            item.duration_ms = pair.duration_ms
+            item.status = "ready"
+            item.reason = "音频已重编码" if result.audio_reencoded else ""
+    except (HdrUnsupported, UnsupportedFormat, NoVivoUuid, NoBenefit) as exc:
+        with state.lock:
+            item.status = "skipped"
+            item.reason = str(exc)
+    except (BadRequest, CompressError, ADBError, OSError, ValueError) as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = str(exc)
+    except Exception as exc:  # keep one bad file from aborting a batch
+        with state.lock:
+            item.status = "error"
+            item.reason = f"{type(exc).__name__}: {exc}"
+    finally:
+        with state.lock:
+            item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            job.done += 1
+
+
+def _compress_job(
+    state: StudioState,
+    job: Job,
+    preset,
+    speed: str = "veryfast",
+    compute_ssim: bool = False,
+) -> None:
     directory = _job_dir(job)
     src_dir = directory / "src"
     out_dir = directory / "out"
     src_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for item in job.items:
-        with state.lock:
-            item.status = "running"
-        try:
-            pair = state.pairs_by_mp4.get(item.mp4)
-            if pair is None:
-                raise BadRequest("不在实况照片配对清单中")
-            if pair.duration_ms is not None and pair.duration_ms > state.max_duration:
-                raise CompressError(f"时长 {pair.duration_ms}ms 超过上限，已跳过")
-            free = shutil.disk_usage(str(state_dir())).free
-            if free < estimate_local_need(pair.size):
-                raise CompressError(
-                    f"本机空间不足：需要约 {human(estimate_local_need(pair.size))}，"
-                    f"当前可用 {human(free)}；请缩小批次"
-                )
-            local_src = src_dir / (_safe_sha1(pair.mp4)[:12] + "-" + pair.mp4.rsplit("/", 1)[-1])
-            with state.adb_lock:
-                if not state.adb.remote_exists(pair.jpg):
-                    raise CompressError("同名 JPG 不存在，已跳过")
-                state.adb.pull(pair.mp4, str(local_src))
-                remote_size = state.adb.remote_size(pair.mp4)
-                remote_mtime = state.adb.remote_mtime(pair.mp4) or 0
-            local_size = local_src.stat().st_size if local_src.exists() else 0
-            if not local_size:
-                raise CompressError("adb pull 失败")
-            if remote_size is not None and remote_size != local_size:
-                raise CompressError(f"拉取大小不一致 {local_size} != {remote_size}")
-            original_md5 = _local_md5(local_src)
-            local_out = out_dir / (_safe_sha1(pair.mp4)[:12] + "-" + pair.mp4.rsplit("/", 1)[-1])
-            result = compress_file(
-                str(local_src),
-                str(local_out),
+    if not job.items:
+        return
+    workers = max(1, min(state.workers, len(job.items)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(
+                _compress_one,
+                state,
+                job,
+                item,
                 preset,
-                ffmpeg=state.ffmpeg,
-                ffprobe=state.ffprobe,
-                compute_ssim=True,
+                speed,
+                compute_ssim,
+                src_dir,
+                out_dir,
+                directory,
             )
-            compressed_md5 = _local_md5(local_out)
-            with state.lock:
-                item.original_size = result.original_size
-                item.compressed_size = result.compressed_size
-                item.ssim = result.ssim
-                item.original_md5 = original_md5
-                item.compressed_md5 = compressed_md5
-                item.output = local_out.relative_to(directory).as_posix()
-                item.source = local_src.relative_to(directory).as_posix()
-                item.mtime = remote_mtime
-                item.duration_ms = pair.duration_ms
-                item.status = "ready"
-                item.reason = "音频已重编码" if result.audio_reencoded else ""
-        except (HdrUnsupported, UnsupportedFormat, NoVivoUuid, NoBenefit) as exc:
-            with state.lock:
-                item.status = "skipped"
-                item.reason = str(exc)
-        except (BadRequest, CompressError, ADBError, OSError, ValueError) as exc:
-            with state.lock:
-                item.status = "error"
-                item.reason = str(exc)
-        except Exception as exc:  # keep one bad file from aborting a batch
-            with state.lock:
-                item.status = "error"
-                item.reason = f"{type(exc).__name__}: {exc}"
-        finally:
-            with state.lock:
-                job.done += 1
+            for item in job.items
+        ]
+        for future in as_completed(futures):
+            with contextlib.suppress(Exception):
+                future.result()
+    if job.cancel_requested:
+        job.message = "已停止；已完成的部分仍可应用"
+
+
+def _apply_one(
+    state: StudioState,
+    job: Job,
+    source_job: Job,
+    item: ItemResult,
+    backup_dir: Path,
+    manifest_rows: List[List[str]],
+    restore_rows: List[Tuple[str, str, int]],
+) -> None:
+    started = time.monotonic()
+    with state.lock:
+        item.status = "running"
+    try:
+        src = state.find_item(source_job.id, item.mp4)
+        if src is None or src.status not in ("ready", "applied"):
+            raise CompressError("压缩结果不可用，请重新压缩")
+        output = _job_file(state, source_job.id, src.output)
+        if output is None or not output.exists():
+            raise CompressError("本地压缩文件不存在")
+        if _local_md5(output) != src.compressed_md5:
+            raise CompressError("本地压缩文件 MD5 已变化，请重新压缩")
+        pair = state.pairs_by_mp4.get(item.mp4)
+        if pair is None:
+            raise CompressError("不在实况照片配对清单中")
+        probe = state.adb.sh(
+            f"md5sum {sh_quote(pair.mp4)}; "
+            f"stat -c '%Y %a' {sh_quote(pair.mp4)}; "
+            f"[ -f {sh_quote(pair.jpg)} ] && echo JPG_OK",
+            check=False,
+        )
+        lines = [line.strip() for line in probe.splitlines() if line.strip()]
+        if "JPG_OK" not in lines:
+            raise CompressError("同名 JPG 不存在，已跳过")
+        hash_line = next(
+            (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)),
+            "",
+        )
+        stat_line = next(
+            (line for line in lines if re.fullmatch(r"\d+\s+\d+", line)),
+            "",
+        )
+        if not hash_line or not stat_line:
+            raise CompressError("无法读取手机文件信息，已跳过")
+        remote_md5 = hash_line.split()[0].lower()
+        stat_parts = stat_line.split()
+        if remote_md5 != src.original_md5:
+            raise CompressError(
+                f"手机文件已变化（{remote_md5 or '读取失败'}），已跳过"
+            )
+        mtime = int(stat_parts[0]) or src.mtime
+        mode = stat_parts[1] or "660"
+        source_local = _job_file(state, source_job.id, src.source)
+        if source_local is None or not source_local.exists():
+            raise CompressError("本地原始备份副本丢失，已跳过")
+        target = _backup_target(backup_dir, pair.mp4)
+        _backup_verified(source_local, target, src.original_md5)
+        with state.lock:
+            item.backup = _rel_to_backup(target)
+            item.original_size = src.original_size
+            item.compressed_size = src.compressed_size
+            item.ssim = src.ssim
+            item.original_md5 = src.original_md5
+            item.compressed_md5 = src.compressed_md5
+            item.mtime = mtime
+            item.duration_ms = pair.duration_ms
+        try:
+            _push_replace(
+                state,
+                output,
+                pair.mp4,
+                src.compressed_md5,
+                mtime,
+                mode=mode,
+            )
+            # The backup holds the only needed copy now; the job source is
+            # either a hard link to it or a redundant copy. The encoded
+            # output also lives on the phone, so drop both to save space.
+            with contextlib.suppress(OSError):
+                source_local.unlink()
+            with contextlib.suppress(OSError):
+                output.unlink()
+        except Exception:
+            try:
+                _restore_one(state, target, pair.mp4, src.original_md5, mtime)
+            except Exception as restore_error:
+                raise CompressError(
+                    f"替换失败且自动恢复失败: {restore_error}"
+                ) from restore_error
+            raise
+        with state.lock:
+            state.update_scan_size(pair.mp4, src.compressed_size)
+            pair.size = src.compressed_size
+            item.status = "applied"
+            src.status = "applied"
+            src.backup = item.backup
+            manifest_rows.append(
+                [
+                    pair.mp4,
+                    pair.jpg,
+                    src.original_size,
+                    src.compressed_size,
+                    src.original_md5,
+                    src.compressed_md5,
+                    mtime,
+                ]
+            )
+            restore_rows.append(
+                (target.relative_to(backup_dir).as_posix(), pair.mp4, mtime)
+            )
+    except (CompressError, ADBError, OSError, ValueError) as exc:
+        with state.lock:
+            item.status = "error"
+            item.reason = str(exc)
+    except Exception as exc:  # keep one bad file from aborting a batch
+        with state.lock:
+            item.status = "error"
+            item.reason = f"{type(exc).__name__}: {exc}"
+    finally:
+        with state.lock:
+            item.elapsed_ms = int((time.monotonic() - started) * 1000)
+            job.done += 1
 
 
 def _apply_job(state: StudioState, job: Job, source_job: Job) -> None:
     backup_dir = _new_backup_dir()
     manifest_rows: List[List[str]] = []
     restore_rows: List[Tuple[str, str, int]] = []
-    for item in job.items:
-        with state.lock:
-            item.status = "running"
-        applied = False
-        try:
-            src = state.find_item(source_job.id, item.mp4)
-            if src is None or src.status not in ("ready", "applied"):
-                raise CompressError("压缩结果不可用，请重新压缩")
-            output = _job_file(state, source_job.id, src.output)
-            if output is None or not output.exists():
-                raise CompressError("本地压缩文件不存在")
-            if _local_md5(output) != src.compressed_md5:
-                raise CompressError("本地压缩文件 MD5 已变化，请重新压缩")
-            pair = state.pairs_by_mp4.get(item.mp4)
-            if pair is None:
-                raise CompressError("不在实况照片配对清单中")
-            with state.adb_lock:
-                if not state.adb.remote_exists(pair.jpg):
-                    raise CompressError("同名 JPG 不存在，已跳过")
-                remote_md5 = state.adb.remote_md5(pair.mp4)
-                if remote_md5 != src.original_md5:
-                    raise CompressError(
-                        f"手机文件已变化（{remote_md5 or '读取失败'}），已跳过"
-                    )
-                mtime = state.adb.remote_mtime(pair.mp4) or src.mtime
-                mode = state.adb.remote_mode(pair.mp4) or "660"
-            source_local = _job_file(state, source_job.id, src.source)
-            if source_local is None or not source_local.exists():
-                raise CompressError("本地原始备份副本丢失，已跳过")
-            target = _backup_target(backup_dir, pair.mp4)
-            _backup_verified(source_local, target, src.original_md5)
-            item.backup = _rel_to_backup(target)
-            with state.lock:
-                item.original_size = src.original_size
-                item.compressed_size = src.compressed_size
-                item.ssim = src.ssim
-                item.original_md5 = src.original_md5
-                item.compressed_md5 = src.compressed_md5
-                item.mtime = mtime
-                item.duration_ms = pair.duration_ms
-            try:
-                _push_replace(
+    if job.items:
+        workers = max(1, min(state.apply_workers, len(job.items)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(
+                    _apply_one,
                     state,
-                    output,
-                    pair.mp4,
-                    src.compressed_md5,
-                    mtime,
-                    mode=mode,
+                    job,
+                    source_job,
+                    item,
+                    backup_dir,
+                    manifest_rows,
+                    restore_rows,
                 )
-                applied = True
-                # The backup holds the only needed copy now; the job source is
-                # either a hard link to it or a redundant copy. The encoded
-                # output also lives on the phone, so drop both to save space.
-                with contextlib.suppress(OSError):
-                    source_local.unlink()
-                with contextlib.suppress(OSError):
-                    output.unlink()
-            except Exception:
-                try:
-                    _restore_one(state, target, pair.mp4, src.original_md5, mtime)
-                except Exception as restore_error:
-                    raise CompressError(
-                        f"替换失败且自动恢复失败: {restore_error}"
-                    ) from restore_error
-                raise
-            with state.lock:
-                state.update_scan_size(pair.mp4, src.compressed_size)
-                pair.size = src.compressed_size
-                item.status = "applied"
-                src.status = "applied"
-                src.backup = item.backup
-                manifest_rows.append(
-                    [
-                        pair.mp4,
-                        pair.jpg,
-                        src.original_size,
-                        src.compressed_size,
-                        src.original_md5,
-                        src.compressed_md5,
-                        mtime,
-                    ]
-                )
-                restore_rows.append(
-                    (target.relative_to(backup_dir).as_posix(), pair.mp4, mtime)
-                )
-        except (CompressError, ADBError, OSError, ValueError) as exc:
-            with state.lock:
-                item.status = "error"
-                item.reason = str(exc)
-        except Exception as exc:  # keep one bad file from aborting a batch
-            with state.lock:
-                item.status = "error"
-                item.reason = f"{type(exc).__name__}: {exc}"
-        finally:
-            with state.lock:
-                job.done += 1
-                if applied:
-                    job.message = f"已应用 {sum(1 for i in job.items if i.status == 'applied')} 个"
+                for item in job.items
+            ]
+            for future in as_completed(futures):
+                with contextlib.suppress(Exception):
+                    future.result()
     if manifest_rows:
         _write_backup_manifest(backup_dir, manifest_rows)
         _write_restore_script(backup_dir, restore_rows)
         save_scan(state.scan)
-        job.message = f"备份目录 {backup_dir}"
-
+        job.message = f"已应用 {len(manifest_rows)} 个；备份目录 {backup_dir}"
+    else:
+        with contextlib.suppress(OSError):
+            backup_dir.rmdir()
 
 def _restore_job(state: StudioState, job: Job, source_job: Job) -> None:
     for item in job.items:
@@ -832,11 +968,24 @@ def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None
             if backup_path is None or not backup_path.exists():
                 raise CompressError("备份文件不存在或超出备份目录")
             with state.adb_lock:
-                if not state.adb.remote_exists(item.mp4):
+                probe = state.adb.sh(
+                    f"[ -f {sh_quote(item.mp4)} ] && echo MP4_OK; "
+                    f"[ -f {sh_quote(item.jpg)} ] && echo JPG_OK; "
+                    f"md5sum {sh_quote(item.mp4)}",
+                    check=False,
+                )
+                lines = [line.strip() for line in probe.splitlines() if line.strip()]
+                if "MP4_OK" not in lines:
                     raise CompressError("手机上的目标 MP4 已不存在，跳过")
-                if not state.adb.remote_exists(item.jpg):
+                if "JPG_OK" not in lines:
                     raise CompressError("同名 JPG 不存在，跳过")
-                current = state.adb.remote_md5(item.mp4)
+                hash_line = next(
+                    (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)),
+                    "",
+                )
+                if not hash_line:
+                    raise CompressError("无法读取手机文件 MD5，跳过")
+                current = hash_line.split()[0].lower()
             if current == entry["original_md5"]:
                 item.reason = "手机已经是原始文件"
             elif current == entry["new_md5"]:
@@ -936,6 +1085,7 @@ def _item_payload(item: ItemResult) -> Dict:
         "backup": item.backup,
         "mtime": item.mtime,
         "duration_ms": item.duration_ms,
+        "elapsed_ms": item.elapsed_ms,
     }
 
 
@@ -950,6 +1100,7 @@ def _job_payload(job: Job) -> Dict:
         "error": job.error,
         "created_at": job.created_at,
         "finished_at": job.finished_at,
+        "cancel_requested": job.cancel_requested,
         "items": [_item_payload(item) for item in job.items],
     }
 
@@ -1363,7 +1514,15 @@ class StudioHandler(BaseHTTPRequestHandler):
                 "version": _tool_version(self.state.ffmpeg) if ffmpeg_ok else "",
                 "ffprobe_version": _tool_version(self.state.ffprobe) if ffprobe_ok else "",
             },
+            "hardware": {
+                "ok": bool(self.state.hardware_encoder),
+                "encoder": self.state.hardware_encoder,
+            },
             "presets": _presets_payload(),
+            "speeds": [{"key": key, "label": SPEED_LABELS[key]} for key in SPEED_ORDER],
+            "default_speed": "hardware" if self.state.hardware_encoder else "veryfast",
+            "workers": self.state.workers,
+            "apply_workers": self.state.apply_workers,
             "crf_range": [UI_CRF_MIN, UI_CRF_MAX],
             "backup_bytes": backup_bytes,
             "backup_dir": str(BACKUPS_DIR),
@@ -1413,6 +1572,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/api/delete-backups":
             self._post_delete_backups(payload)
             return
+        if path.startswith("/api/jobs/") and path.endswith("/cancel"):
+            self._post_cancel(path)
+            return
         if path == "/api/scan":
             self._post_scan()
             return
@@ -1440,6 +1602,11 @@ class StudioHandler(BaseHTTPRequestHandler):
             UI_CRF_MIN <= preset.crf <= UI_CRF_MAX
         ):
             raise BadRequest(f"界面 CRF 限制为 {UI_CRF_MIN}–{UI_CRF_MAX}")
+        default_speed = "hardware" if state.hardware_encoder else "veryfast"
+        speed = resolve_speed(str(payload.get("speed", default_speed)))
+        if speed == "hardware" and not state.hardware_encoder:
+            raise BadRequest("当前 ffmpeg 不支持 Apple 硬件编码，请选择快/均衡/最小体积")
+        compute_ssim = bool(payload.get("compute_ssim", False))
         items = []
         total_bytes = 0
         for remote in paths:
@@ -1455,11 +1622,15 @@ class StudioHandler(BaseHTTPRequestHandler):
                 f"本机空间不足：本批约需 {human(needed)}，当前可用 {human(free)}。"
                 "请减少选择数量，或先清理本机任务缓存。"
             )
-        job = state.new_job("compress", items, f"档位：{preset.label}")
+        job = state.new_job(
+            "compress",
+            items,
+            f"{preset.label} · {SPEED_LABELS[speed]} · {state.workers} 并发",
+        )
         _start_thread(
             state,
             job,
-            lambda: _compress_job(state, job, preset),
+            lambda: _compress_job(state, job, preset, speed, compute_ssim),
         )
         self._send_json({"job_id": job.id}, 202)
 
@@ -1525,6 +1696,20 @@ class StudioHandler(BaseHTTPRequestHandler):
             lambda: _restore_job(state, job, source_job),
         )
         self._send_json({"job_id": job.id}, 202)
+
+    def _post_cancel(self, path: str) -> None:
+        job_id = path[len("/api/jobs/") : -len("/cancel")]
+        job = self.state.jobs.get(job_id)
+        if job is None:
+            self._error(404, "任务不存在")
+            return
+        if job.status != "running":
+            raise BadRequest("任务已经结束")
+        if job.kind != "compress":
+            raise BadRequest("只有压缩任务支持中途停止")
+        job.cancel_requested = True
+        job.message = "正在停止，等待当前文件结束…"
+        self._send_json({"cancelled": True, "job_id": job.id})
 
     def _post_delete_backups(self, payload: Dict) -> None:
         state = self.state
@@ -1634,6 +1819,7 @@ def serve(args) -> int:
     props = adb.props()
     model = props.get("ro.product.model", "") or props.get("ro.product.vendor.model", "")
     android = props.get("ro.build.version.release", "")
+    hardware_encoder = detect_hardware_encoder(getattr(args, "ffmpeg", "ffmpeg"))
     token = secrets.token_urlsafe(32)
     port = int(getattr(args, "port", 8765))
     state = StudioState(
@@ -1648,6 +1834,9 @@ def serve(args) -> int:
         ffprobe=getattr(args, "ffprobe", "ffprobe"),
         max_duration=getattr(args, "max_duration", 5000),
         include_unknown=getattr(args, "include_unknown", False),
+        workers=max(1, min(int(getattr(args, "workers", 3)), 8)),
+        apply_workers=max(1, min(int(getattr(args, "apply_workers", 4)), 4)),
+        hardware_encoder=hardware_encoder,
         model=model,
         android=android,
     )
@@ -1657,6 +1846,10 @@ def serve(args) -> int:
     print(f"  adbclean Studio  {model}  Android {android}")
     print(f"  实况照片 {len(pairs):,} 个 / {human(sum(pair.size for pair in pairs))}")
     print(f"  日期 {len(state.dates()):,} 天；时长未知 {len(unknown):,} 个；超长 {len(too_long):,} 个")
+    print(
+        f"  并行压缩 {state.workers} 路 / 应用 {state.apply_workers} 路；默认 "
+        + ("hardware（VideoToolbox）" if hardware_encoder else "veryfast")
+    )
     print(f"  工作台 {url}")
     print(f"  任务目录 {JOBS_DIR}")
     print(f"  备份目录 {BACKUPS_DIR}")
