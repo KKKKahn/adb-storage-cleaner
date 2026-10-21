@@ -144,10 +144,10 @@ final class MediaAdapter extends BaseAdapter {
         imageWrap.addView(thumb, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView check = Ui.text(context, "", 12f, Color.WHITE, true);
+        TextView check = Ui.text(context, "", 13f, Color.WHITE, true);
         check.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(
-                Ui.dp(context, 24), Ui.dp(context, 24));
+                Ui.dp(context, 27), Ui.dp(context, 27));
         checkParams.gravity = Gravity.TOP | Gravity.START;
         checkParams.setMargins(Ui.dp(context, 6), Ui.dp(context, 6), 0, 0);
         imageWrap.addView(check, checkParams);
@@ -161,10 +161,10 @@ final class MediaAdapter extends BaseAdapter {
         typeParams.setMargins(0, Ui.dp(context, 7), Ui.dp(context, 6), 0);
         imageWrap.addView(type, typeParams);
 
-        TextView time = Ui.text(context, "", 8.5f, Color.WHITE, false);
-        time.setPadding(Ui.dp(context, 4), Ui.dp(context, 1),
-                Ui.dp(context, 4), Ui.dp(context, 1));
-        time.setBackground(Ui.round(0x99000000, 4f, context));
+        TextView time = Ui.text(context, "", 9.5f, Color.WHITE, false);
+        time.setPadding(Ui.dp(context, 4), Ui.dp(context, 2),
+                Ui.dp(context, 4), Ui.dp(context, 2));
+        time.setBackground(Ui.round(0x99000000, 5f, context));
         FrameLayout.LayoutParams timeParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         timeParams.gravity = Gravity.BOTTOM | Gravity.START;
@@ -187,7 +187,7 @@ final class MediaAdapter extends BaseAdapter {
         root.addView(textWrap, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView meta = Ui.text(context, "", 9f, Ui.MUTED, false);
+        TextView meta = Ui.text(context, "", 10f, Ui.MUTED, false);
         meta.setSingleLine(true);
         meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
         textWrap.addView(meta);

@@ -109,12 +109,12 @@ final class MonthAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
-        root.setPadding(Ui.dp(context, 10), Ui.dp(context, 8),
-                Ui.dp(context, 10), Ui.dp(context, 8));
-        root.setBackground(Ui.round(Ui.CARD, 9f, context));
+        root.setPadding(Ui.dp(context, 12), Ui.dp(context, 10),
+                Ui.dp(context, 10), Ui.dp(context, 10));
+        root.setBackground(Ui.round(Ui.CARD, 12f, context));
         RecyclerView.LayoutParams params = new RecyclerView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, Ui.dp(context, 7), 0, Ui.dp(context, 5));
+        params.setMargins(0, Ui.dp(context, 9), 0, Ui.dp(context, 5));
         root.setLayoutParams(params);
         CheckBox check = new CheckBox(context);
         check.setClickable(false);
@@ -126,20 +126,25 @@ final class MonthAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 },
                 new int[]{Ui.ACCENT, 0xFF59627C}));
         root.addView(check, new LinearLayout.LayoutParams(
-                Ui.dp(context, 34), Ui.dp(context, 40)));
+                Ui.dp(context, 40), Ui.dp(context, 44)));
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
         root.addView(texts, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView title = Ui.text(context, "", 12.5f, Ui.TEXT, true);
+        TextView title = Ui.text(context, "", 14f, Ui.TEXT, true);
         texts.addView(title);
-        TextView meta = Ui.text(context, "", 9.5f, Ui.MUTED, false);
+        TextView meta = Ui.text(context, "", 10.5f, Ui.MUTED, false);
         meta.setPadding(0, Ui.dp(context, 2), 0, 0);
         texts.addView(meta);
-        TextView select = Ui.text(context, "全选本日", 9.5f, Ui.ACCENT, true);
-        select.setPadding(Ui.dp(context, 6), Ui.dp(context, 5),
-                Ui.dp(context, 6), Ui.dp(context, 5));
-        root.addView(select);
+        TextView select = Ui.text(context, "全选本日", 12.5f, Ui.ACCENT, true);
+        select.setGravity(Gravity.CENTER);
+        select.setPadding(Ui.dp(context, 12), Ui.dp(context, 8),
+                Ui.dp(context, 12), Ui.dp(context, 8));
+        select.setBackground(Ui.bordered(0x332F7BFF, 10f, 0xFF4A5480, context));
+        LinearLayout.LayoutParams selectParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(context, 38));
+        selectParams.setMarginStart(Ui.dp(context, 8));
+        root.addView(select, selectParams);
         HeaderHolder holder = new HeaderHolder(root);
         holder.check = check;
         holder.title = title;
@@ -165,10 +170,10 @@ final class MonthAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         imageWrap.addView(thumb, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        TextView check = Ui.text(context, "", 12f, Color.WHITE, true);
+        TextView check = Ui.text(context, "", 13f, Color.WHITE, true);
         check.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(
-                Ui.dp(context, 24), Ui.dp(context, 24));
+                Ui.dp(context, 27), Ui.dp(context, 27));
         checkParams.gravity = Gravity.TOP | Gravity.START;
         checkParams.setMargins(Ui.dp(context, 6), Ui.dp(context, 6), 0, 0);
         imageWrap.addView(check, checkParams);
@@ -197,9 +202,9 @@ final class MonthAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         outcomeParams.gravity = Gravity.BOTTOM | Gravity.END;
         outcomeParams.setMargins(0, 0, Ui.dp(context, 6), Ui.dp(context, 6));
         imageWrap.addView(outcome, outcomeParams);
-        TextView time = Ui.text(context, "", 9f, Ui.MUTED, false);
-        time.setPadding(Ui.dp(context, 7), Ui.dp(context, 5),
-                Ui.dp(context, 7), Ui.dp(context, 7));
+        TextView time = Ui.text(context, "", 10f, Ui.MUTED, false);
+        time.setPadding(Ui.dp(context, 8), Ui.dp(context, 6),
+                Ui.dp(context, 8), Ui.dp(context, 8));
         root.addView(time);
         PhotoHolder holder = new PhotoHolder(root);
         holder.thumb = thumb;

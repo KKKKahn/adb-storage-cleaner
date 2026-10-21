@@ -116,7 +116,6 @@ public final class MainActivity extends Activity {
     private TextView statusAll;
     private TextView statusUncompressed;
     private TextView statusCompressed;
-    private TextView dateButton;
     private TextView sortButton;
     private TextView hint;
     private TextView emptyView;
@@ -135,6 +134,9 @@ public final class MainActivity extends Activity {
     private TextView backupButton;
     private ImageView galleryButton;
     private TextView modeLabel;
+    private TextView modeTitle;
+    private TextView modeSubtitle;
+    private ImageView backButton;
     private FrameLayout modeOverlay;
     private TextView startLiveCount;
     private TextView startLiveSize;
@@ -333,8 +335,6 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         page.addView(buildHeader());
-        page.addView(buildSummary());
-        page.addView(buildModeBar());
         page.addView(buildFilters());
         page.addView(buildHint());
 
@@ -425,58 +425,86 @@ public final class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(Ui.dp(this, 18), Ui.dp(this, 10),
-                Ui.dp(this, 18), Ui.dp(this, 4));
-        header.addView(Ui.logo(this, 32));
-        LinearLayout titleColumn = new LinearLayout(this);
-        titleColumn.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(Ui.dp(this, 10), Ui.dp(this, 10),
+                Ui.dp(this, 10), Ui.dp(this, 4));
+
+        backButton = new ImageView(this);
+        backButton.setImageResource(R.drawable.ic_back);
+        backButton.setColorFilter(Ui.TEXT);
+        backButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        backButton.setPadding(Ui.dp(this, 11), Ui.dp(this, 11),
+                Ui.dp(this, 11), Ui.dp(this, 11));
+        backButton.setContentDescription("返回模式选择");
+        backButton.setClickable(true);
+        backButton.setFocusable(true);
+        backButton.setOnClickListener(v -> showModeChooser());
+        header.addView(backButton, new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48)));
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        titleParams.setMarginStart(Ui.dp(this, 11));
-        header.addView(titleColumn, titleParams);
-        titleColumn.addView(Ui.text(this, "Klean Mobile", 18f, Ui.TEXT, true));
-        TextView sub = Ui.text(this, "本机压缩 · 自动备份",
-                9.5f, Ui.MUTED, false);
-        sub.setPadding(0, Ui.dp(this, 3), 0, 0);
-        sub.setSingleLine(true);
-        sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        titleColumn.addView(sub);
+        titleParams.setMarginStart(Ui.dp(this, 6));
+        header.addView(titles, titleParams);
+        modeTitle = Ui.text(this, "实况照片", 21f, Ui.TEXT, true);
+        titles.addView(modeTitle);
+        modeSubtitle = Ui.text(this, "正在扫描…", 10.5f, Ui.MUTED, false);
+        modeSubtitle.setPadding(0, Ui.dp(this, 4), 0, 0);
+        modeSubtitle.setSingleLine(true);
+        modeSubtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        titles.addView(modeSubtitle);
 
         galleryButton = new ImageView(this);
         galleryButton.setImageResource(R.drawable.ic_filter);
         galleryButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        galleryButton.setPadding(Ui.dp(this, 9), Ui.dp(this, 9),
-                Ui.dp(this, 9), Ui.dp(this, 9));
-        galleryButton.setBackground(Ui.bordered(0xFF1A2033, 11f, 0xFF3A4268, this));
+        galleryButton.setPadding(Ui.dp(this, 12), Ui.dp(this, 12),
+                Ui.dp(this, 12), Ui.dp(this, 12));
+        galleryButton.setBackground(Ui.bordered(0xFF1A2033, 13f, 0xFF3A4268, this));
         galleryButton.setColorFilter(Ui.ACCENT);
         galleryButton.setContentDescription("筛选、按月份或相册浏览");
         galleryButton.setClickable(true);
         galleryButton.setFocusable(true);
         galleryButton.setOnClickListener(v -> openDrawer());
-        LinearLayout.LayoutParams galleryParams = new LinearLayout.LayoutParams(
-                Ui.dp(this, 40), Ui.dp(this, 40));
-        galleryParams.setMarginEnd(Ui.dp(this, 6));
-        header.addView(galleryButton, galleryParams);
+        LinearLayout.LayoutParams filterParams = new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48));
+        filterParams.setMarginStart(Ui.dp(this, 6));
+        header.addView(galleryButton, filterParams);
 
-        backupButton = Ui.button(this, "备份", false);
-        backupButton.setTextSize(11.5f);
-        backupButton.setPadding(Ui.dp(this, 11), Ui.dp(this, 7),
-                Ui.dp(this, 11), Ui.dp(this, 7));
-        backupButton.setOnClickListener(v -> openBackups());
-        LinearLayout.LayoutParams backupParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        backupParams.setMarginEnd(Ui.dp(this, 6));
-        header.addView(backupButton, backupParams);
-
-        scanButton = Ui.button(this, "扫描", false);
-        scanButton.setTextSize(11.5f);
-        scanButton.setPadding(Ui.dp(this, 11), Ui.dp(this, 7),
-                Ui.dp(this, 11), Ui.dp(this, 7));
-        scanButton.setOnClickListener(v -> {
-            if (!busy && !scanning) startScan();
-        });
-        header.addView(scanButton);
+        ImageView more = new ImageView(this);
+        more.setImageResource(R.drawable.ic_more);
+        more.setColorFilter(Ui.TEXT);
+        more.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        more.setPadding(Ui.dp(this, 12), Ui.dp(this, 12),
+                Ui.dp(this, 12), Ui.dp(this, 12));
+        more.setBackground(Ui.bordered(Ui.CARD_2, 13f, Ui.BORDER, this));
+        more.setContentDescription("更多操作");
+        more.setClickable(true);
+        more.setFocusable(true);
+        more.setOnClickListener(this::showOverflowMenu);
+        LinearLayout.LayoutParams moreParams = new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48));
+        moreParams.setMarginStart(Ui.dp(this, 6));
+        header.addView(more, moreParams);
         return header;
+    }
+
+    private void showOverflowMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "原片备份");
+        menu.getMenu().add(0, 2, 1, "重新扫描");
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) {
+                openBackups();
+                return true;
+            }
+            if (item.getItemId() == 2) {
+                if (!busy && !scanning) startScan();
+                return true;
+            }
+            return false;
+        });
+        menu.show();
     }
 
     private View buildSummary() {
@@ -626,13 +654,14 @@ public final class MainActivity extends Activity {
         brandParams.setMarginStart(Ui.dp(this, 11));
         top.addView(brand, brandParams);
         brand.addView(Ui.text(this, "Klean", 20f, Ui.TEXT, true));
-        brand.addView(Ui.text(this, "Android 本机压缩与备份", 9.5f, Ui.MUTED, false));
-        modeClose = Ui.text(this, "×", 24f, Ui.MUTED, true);
-        modeClose.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
+        brand.addView(Ui.text(this, "Android 本机压缩与备份", 10.5f, Ui.MUTED, false));
+        modeClose = Ui.text(this, "×", 26f, Ui.MUTED, true);
+        modeClose.setGravity(Gravity.CENTER);
         modeClose.setClickable(true);
         modeClose.setOnClickListener(v -> modeOverlay.setVisibility(View.GONE));
         modeClose.setVisibility(modeChosen ? View.VISIBLE : View.GONE);
-        top.addView(modeClose);
+        top.addView(modeClose, new LinearLayout.LayoutParams(
+                Ui.dp(this, 44), Ui.dp(this, 44)));
 
         TextView title = Ui.text(this, "选择要处理的类型", 25f, Ui.TEXT, true);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
@@ -692,7 +721,7 @@ public final class MainActivity extends Activity {
         TextView desc = Ui.text(this, live
                         ? "压缩伴生 MP4，保留 vivo 实况标识；JPG 定格画面永不修改。"
                         : "独立压缩普通 MP4，独立备份，按总大小分批更稳。",
-                11f, Ui.MUTED, false);
+                11.5f, Ui.MUTED, false);
         desc.setLineSpacing(Ui.dp(this, 2), 1f);
         desc.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 8));
         card.addView(desc);
@@ -700,26 +729,31 @@ public final class MainActivity extends Activity {
         LinearLayout stats = new LinearLayout(this);
         stats.setOrientation(LinearLayout.HORIZONTAL);
         card.addView(stats);
-        TextView count = Ui.text(this, "—", 18f, Ui.TEXT, true);
+        TextView count = Ui.text(this, "—", 19f, Ui.TEXT, true);
         stats.addView(count, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView size = Ui.text(this, "—", 18f, Ui.TEXT, true);
+        TextView size = Ui.text(this, "—", 19f, Ui.TEXT, true);
         stats.addView(size, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.HORIZONTAL);
         card.addView(labels);
         TextView countLabel = Ui.text(this, live ? "实况照片" : "普通视频",
-                9f, Ui.MUTED, false);
+                10f, Ui.MUTED, false);
         labels.addView(countLabel, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         labels.addView(Ui.text(this, live ? "伴生 MP4" : "总大小",
-                9f, Ui.MUTED, false), new LinearLayout.LayoutParams(
+                10f, Ui.MUTED, false), new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView enter = Ui.text(this, live ? "进入实况 →" : "进入视频 →",
-                11.5f, live ? Ui.ACCENT : Ui.BLUE, true);
-        enter.setPadding(0, Ui.dp(this, 11), 0, 0);
-        card.addView(enter);
+        TextView enter = Ui.text(this, live ? "进入实况照片" : "进入普通视频",
+                14f, Color.WHITE, true);
+        enter.setGravity(Gravity.CENTER);
+        enter.setMinHeight(Ui.dp(this, 46));
+        enter.setBackground(Ui.gradient(12f, this));
+        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        enterParams.topMargin = Ui.dp(this, 12);
+        card.addView(enter, enterParams);
         if (live) {
             startLiveCount = count;
             startLiveSize = size;
@@ -776,26 +810,26 @@ public final class MainActivity extends Activity {
     }
 
     private View buildFilters() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.HORIZONTAL);
+        wrap.setGravity(Gravity.CENTER_VERTICAL);
+        wrap.setPadding(Ui.dp(this, 14), Ui.dp(this, 6),
+                Ui.dp(this, 14), 0);
+
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(Ui.dp(this, 18), Ui.dp(this, 6),
-                Ui.dp(this, 18), 0);
         statusAll = chip("全部");
         statusUncompressed = chip("未压缩");
         statusCompressed = chip("已压缩");
-        dateButton = chip("浏览");
         sortButton = chip("时间");
         addChip(row, statusAll);
         addChip(row, statusUncompressed);
         addChip(row, statusCompressed);
-        addChip(row, dateButton);
         addChip(row, sortButton);
-        dateButton.setVisibility(View.GONE);
         statusAll.setOnClickListener(v -> setStatusFilter("all"));
         statusUncompressed.setOnClickListener(v -> setStatusFilter("uncompressed"));
         statusCompressed.setOnClickListener(v -> setStatusFilter("compressed"));
-        dateButton.setOnClickListener(v -> openDrawer());
         sortButton.setOnClickListener(v -> {
             if (busy || scanning) return;
             sortBySize = !sortBySize;
@@ -804,14 +838,31 @@ public final class MainActivity extends Activity {
         HorizontalScrollView scroll = new HorizontalScrollView(this);
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.addView(row);
-        return scroll;
+        wrap.addView(scroll, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        selectAllButton = Ui.text(this, "全选", 12.5f, Ui.ACCENT, true);
+        selectAllButton.setGravity(Gravity.CENTER);
+        selectAllButton.setPadding(Ui.dp(this, 13), Ui.dp(this, 9),
+                Ui.dp(this, 13), Ui.dp(this, 9));
+        selectAllButton.setBackground(
+                Ui.bordered(0x332F7BFF, 11f, 0xFF4A5480, this));
+        selectAllButton.setClickable(true);
+        selectAllButton.setFocusable(true);
+        selectAllButton.setOnClickListener(v -> toggleSelectAll());
+        LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40));
+        allParams.setMarginStart(Ui.dp(this, 8));
+        wrap.addView(selectAllButton, allParams);
+        return wrap;
     }
 
     private TextView chip(String text) {
-        TextView view = Ui.text(this, text, 10.5f, Ui.MUTED, false);
+        TextView view = Ui.text(this, text, 12f, Ui.MUTED, false);
         view.setGravity(Gravity.CENTER);
-        view.setPadding(Ui.dp(this, 9), Ui.dp(this, 5),
-                Ui.dp(this, 9), Ui.dp(this, 5));
+        view.setMinHeight(Ui.dp(this, 40));
+        view.setPadding(Ui.dp(this, 14), Ui.dp(this, 8),
+                Ui.dp(this, 14), Ui.dp(this, 8));
         view.setClickable(true);
         view.setFocusable(true);
         styleChip(view, false);
@@ -821,22 +872,22 @@ public final class MainActivity extends Activity {
     private void addChip(LinearLayout parent, TextView chip) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMarginEnd(Ui.dp(this, 6));
+        params.setMarginEnd(Ui.dp(this, 7));
         parent.addView(chip, params);
     }
 
     private void styleChip(TextView view, boolean active) {
         view.setBackground(active
-                ? Ui.bordered(0xFF242A48, 8f, Ui.ACCENT, this)
-                : Ui.bordered(Ui.CARD, 8f, Ui.BORDER, this));
+                ? Ui.bordered(0xFF242A48, 11f, Ui.ACCENT, this)
+                : Ui.bordered(Ui.CARD, 11f, Ui.BORDER, this));
         view.setTextColor(active ? Ui.TEXT : Ui.MUTED);
     }
 
     private View buildHint() {
         hint = Ui.text(this, "压缩结果先预览，确认后才替换原片；原片会自动备份",
-                10f, Ui.MUTED, false);
-        hint.setPadding(Ui.dp(this, 18), Ui.dp(this, 6),
-                Ui.dp(this, 18), Ui.dp(this, 2));
+                10.5f, Ui.MUTED, false);
+        hint.setPadding(Ui.dp(this, 14), Ui.dp(this, 8),
+                Ui.dp(this, 14), Ui.dp(this, 2));
         hint.setMaxLines(2);
         return hint;
     }
@@ -871,44 +922,49 @@ public final class MainActivity extends Activity {
 
     private View buildBottomBar() {
         LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(Ui.dp(this, 18), Ui.dp(this, 9),
-                Ui.dp(this, 18), Ui.dp(this, 9));
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 9),
+                Ui.dp(this, 14), Ui.dp(this, 10));
         bar.setBackground(Ui.bordered(Ui.CARD, 0f, Ui.BORDER, this));
 
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        bar.addView(info, new LinearLayout.LayoutParams(
+        LinearLayout infoRow = new LinearLayout(this);
+        infoRow.setOrientation(LinearLayout.HORIZONTAL);
+        infoRow.setGravity(Gravity.CENTER_VERTICAL);
+        bar.addView(infoRow);
+        selectionInfo = Ui.text(this, "已选 0 个 · 0 B", 14f, Ui.TEXT, true);
+        infoRow.addView(selectionInfo, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        LinearLayout line = new LinearLayout(this);
-        line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
-        info.addView(line);
-        selectionInfo = Ui.text(this, "已选 0 个 · 0 B", 12.5f, Ui.TEXT, true);
-        line.addView(selectionInfo);
-        clearButton = Ui.text(this, "清空", 10.5f, Ui.ACCENT, false);
-        clearButton.setPadding(Ui.dp(this, 9), Ui.dp(this, 2),
-                Ui.dp(this, 2), Ui.dp(this, 2));
+        clearButton = Ui.text(this, "清空", 12f, Ui.ACCENT, true);
+        clearButton.setGravity(Gravity.CENTER);
+        clearButton.setMinHeight(Ui.dp(this, 38));
+        clearButton.setPadding(Ui.dp(this, 14), Ui.dp(this, 8),
+                Ui.dp(this, 14), Ui.dp(this, 8));
+        clearButton.setBackground(Ui.bordered(0x22191F31, 10f, Ui.BORDER, this));
         clearButton.setClickable(true);
         clearButton.setOnClickListener(v -> clearSelection());
-        line.addView(clearButton);
+        infoRow.addView(clearButton);
         selectionHint = Ui.text(this, "原片自动备份，可随时恢复",
-                9.5f, Ui.MUTED, false);
+                10.5f, Ui.MUTED, false);
         selectionHint.setPadding(0, Ui.dp(this, 3), 0, 0);
-        info.addView(selectionHint);
+        bar.addView(selectionHint);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsParams.topMargin = Ui.dp(this, 8);
+        bar.addView(actions, actionsParams);
 
         previewButton = Ui.button(this, "预览", false);
-        previewButton.setTextSize(11f);
-        previewButton.setPadding(Ui.dp(this, 10), Ui.dp(this, 8),
-                Ui.dp(this, 10), Ui.dp(this, 8));
+        previewButton.setTextSize(13.5f);
         previewButton.setOnClickListener(v -> previewSelection());
-        bar.addView(previewButton);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 46), 1f);
+        previewParams.setMarginEnd(Ui.dp(this, 8));
+        actions.addView(previewButton, previewParams);
 
-        compressButton = Ui.button(this, "压缩", true);
-        compressButton.setTextSize(12.5f);
-        compressButton.setPadding(Ui.dp(this, 16), Ui.dp(this, 10),
-                Ui.dp(this, 16), Ui.dp(this, 10));
+        compressButton = Ui.button(this, "开始压缩", true);
+        compressButton.setTextSize(14f);
         compressButton.setOnClickListener(v -> {
             if (busy) {
                 if (applying) return;
@@ -919,9 +975,8 @@ public final class MainActivity extends Activity {
             }
         });
         LinearLayout.LayoutParams compressParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        compressParams.setMarginStart(Ui.dp(this, 6));
-        bar.addView(compressButton, compressParams);
+                0, Ui.dp(this, 46), 1.6f);
+        actions.addView(compressButton, compressParams);
         return bar;
     }
 
@@ -990,21 +1045,6 @@ public final class MainActivity extends Activity {
         styleChip(statusCompressed, "compressed".equals(statusFilter));
         boolean dateActive = !albumFilter.isEmpty() || rangeStart > 0 || rangeEnd > 0;
         styleChip(sortButton, sortBySize);
-        dateButton.setVisibility(dateActive ? View.VISIBLE : View.GONE);
-        if (dateActive) {
-            styleChip(dateButton, true);
-            if (!albumFilter.isEmpty()) {
-                dateButton.setText(shortAlbum(albumFilter));
-            } else if ("day".equals(dateMode)) {
-                dateButton.setText(rangeLabel(rangeStart));
-            } else if ("month".equals(dateMode)) {
-                dateButton.setText(monthLabel(rangeStart));
-            } else if (rangeStart > 0 && rangeEnd > 0) {
-                dateButton.setText(rangeLabel(rangeStart) + "~" + rangeLabel(rangeEnd));
-            } else {
-                dateButton.setText(rangeLabel(rangeStart) + "~");
-            }
-        }
         if (galleryButton != null) {
             galleryButton.setColorFilter(Ui.ACCENT);
             galleryButton.setBackground(dateActive
@@ -1025,12 +1065,26 @@ public final class MainActivity extends Activity {
 
     private void updateHint() {
         if (hint == null) return;
-        if (rangeStart > 0 || rangeEnd > 0 || !"all".equals(statusFilter)) {
+        if (rangeStart > 0 || rangeEnd > 0 || !"all".equals(statusFilter)
+                || !albumFilter.isEmpty()) {
             long bytes = 0;
             for (MediaItem item : displayedItems) bytes += item.size;
+            StringBuilder scope = new StringBuilder();
+            if (!albumFilter.isEmpty()) {
+                scope.append(shortAlbum(albumFilter)).append(" · ");
+            } else if ("month".equals(dateMode)) {
+                scope.append(monthLabel(rangeStart)).append(" · ");
+            } else if ("day".equals(dateMode)) {
+                scope.append(rangeLabel(rangeStart)).append(" · ");
+            } else if (rangeStart > 0 && rangeEnd > 0) {
+                scope.append(rangeLabel(rangeStart)).append("~")
+                        .append(rangeLabel(rangeEnd)).append(" · ");
+            } else if (rangeStart > 0) {
+                scope.append(rangeLabel(rangeStart)).append(" 起 · ");
+            }
             hint.setText(String.format(Locale.CHINA,
-                    "当前筛选 %d 个 · %s。压缩结果先预览，确认后才替换原片。",
-                    displayedItems.size(), Ui.bytes(bytes)));
+                    "%s%d 个 · %s。压缩结果先预览，确认后才替换原片。",
+                    scope, displayedItems.size(), Ui.bytes(bytes)));
         } else {
             hint.setText("压缩结果先预览，确认后才替换原片；原片会自动备份");
         }
@@ -1044,15 +1098,13 @@ public final class MainActivity extends Activity {
             bytes += item.size;
             if (item.compressed) compressed++;
         }
-        if (modeLabel != null) {
-            modeLabel.setText(String.format(Locale.CHINA, "%s · %d",
-                    tab == 0 ? "实况照片" : "普通视频", current.size()));
+        if (modeTitle != null) modeTitle.setText(tab == 0 ? "实况照片" : "普通视频");
+        if (modeSubtitle != null) {
+            modeSubtitle.setText(String.format(Locale.CHINA,
+                    "%d 个 · %s · 已压缩 %d", current.size(), Ui.bytes(bytes), compressed));
         }
-        if (statLabel1 != null) statLabel1.setText(tab == 0 ? "实况照片" : "普通视频");
-        if (liveValue != null) liveValue.setText(String.valueOf(current.size()));
-        if (statLabel2 != null) statLabel2.setText("总大小");
-        if (videoValue != null) videoValue.setText(Ui.bytes(bytes));
-        if (statLabel3 != null) statLabel3.setText("已压缩");
+        if (liveValue != null) liveValue.setText(String.valueOf(liveItems.size()));
+        if (videoValue != null) videoValue.setText(String.valueOf(videoItems.size()));
         if (compressedValue != null) compressedValue.setText(String.valueOf(compressed));
     }
 
@@ -1136,8 +1188,9 @@ public final class MainActivity extends Activity {
                 "已选 %d 个 · %s", selected.size(), Ui.bytes(bytes)));
         clearButton.setVisibility(selected.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         clearButton.setAlpha(busy ? 0.4f : 1f);
-        previewButton.setVisibility(selected.size() == 1 ? View.VISIBLE : View.INVISIBLE);
-        previewButton.setAlpha(busy ? 0.4f : 1f);
+        boolean canPreview = selected.size() == 1 && !busy;
+        previewButton.setEnabled(canPreview);
+        previewButton.setAlpha(canPreview ? 1f : 0.45f);
         if (selectionHint != null) {
             if (busy) {
                 selectionHint.setText("处理时请保持 Klean 在前台");
@@ -1172,11 +1225,15 @@ public final class MainActivity extends Activity {
                 compressButton.setEnabled(!applying);
                 compressButton.setAlpha(applying ? 0.6f : 1f);
             } else {
-                compressButton.setText("压缩");
+                compressButton.setText("开始压缩");
                 boolean enabled = !scanning && compressible > 0;
                 compressButton.setEnabled(enabled);
                 compressButton.setAlpha(enabled ? 1f : 0.45f);
             }
+        }
+        if (backButton != null) {
+            backButton.setAlpha(busy ? 0.4f : 1f);
+            backButton.setClickable(!busy);
         }
         if (scanButton != null) {
             scanButton.setAlpha(scanning || busy ? 0.45f : 1f);
@@ -1248,17 +1305,17 @@ public final class MainActivity extends Activity {
         titles.setOrientation(LinearLayout.VERTICAL);
         header.addView(titles, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        titles.addView(Ui.text(this, "照片与相册", 20f, Ui.TEXT, true));
+        titles.addView(Ui.text(this, "照片与相册", 21f, Ui.TEXT, true));
         TextView drawerSub = Ui.text(this,
-                "按年/月浏览；进入月份后按日期分组，可直接全选某天", 9.5f, Ui.MUTED, false);
+                "按年/月浏览，进入月份后可按天全选", 10.5f, Ui.MUTED, false);
         drawerSub.setPadding(0, Ui.dp(this, 3), 0, 0);
         titles.addView(drawerSub);
-        TextView close = Ui.text(this, "×", 24f, Ui.MUTED, true);
+        TextView close = Ui.text(this, "×", 26f, Ui.MUTED, true);
         close.setGravity(Gravity.CENTER);
-        close.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
         close.setClickable(true);
         close.setOnClickListener(v -> closeDrawer());
-        header.addView(close);
+        header.addView(close, new LinearLayout.LayoutParams(
+                Ui.dp(this, 44), Ui.dp(this, 44)));
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
@@ -1297,17 +1354,20 @@ public final class MainActivity extends Activity {
         footer.setBackground(Ui.bordered(Ui.CARD, 0f, Ui.BORDER, this));
         drawerPanel.addView(footer);
         TextView range = Ui.button(this, "日期范围…", false);
-        range.setTextSize(10.5f);
-        range.setPadding(Ui.dp(this, 10), Ui.dp(this, 7),
-                Ui.dp(this, 10), Ui.dp(this, 7));
+        range.setTextSize(12.5f);
+        LinearLayout.LayoutParams rangeParams = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 42), 1f);
+        rangeParams.setMarginEnd(Ui.dp(this, 10));
+        footer.addView(range, rangeParams);
         range.setOnClickListener(v -> {
             closeDrawer();
             pickDateRange();
         });
-        footer.addView(range);
-        TextView clear = Ui.text(this, "清除筛选", 10.5f, Ui.DANGER, false);
-        clear.setPadding(Ui.dp(this, 12), Ui.dp(this, 6),
-                Ui.dp(this, 4), Ui.dp(this, 6));
+        TextView clear = Ui.text(this, "清除筛选", 12.5f, Ui.DANGER, true);
+        clear.setGravity(Gravity.CENTER);
+        clear.setMinHeight(Ui.dp(this, 42));
+        clear.setPadding(Ui.dp(this, 14), Ui.dp(this, 10),
+                Ui.dp(this, 14), Ui.dp(this, 10));
         clear.setClickable(true);
         clear.setOnClickListener(v -> {
             albumFilter = "";
@@ -1318,8 +1378,7 @@ public final class MainActivity extends Activity {
             applyFilters();
             closeDrawer();
         });
-        footer.addView(clear, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        footer.addView(clear);
         return drawerOverlay;
     }
 
@@ -1367,13 +1426,13 @@ public final class MainActivity extends Activity {
             LinearLayout yearHead = new LinearLayout(this);
             yearHead.setOrientation(LinearLayout.HORIZONTAL);
             yearHead.setGravity(Gravity.CENTER_VERTICAL);
-            yearHead.setPadding(Ui.dp(this, 8), Ui.dp(this, 12),
-                    Ui.dp(this, 6), Ui.dp(this, 5));
+            yearHead.setPadding(Ui.dp(this, 8), Ui.dp(this, 14),
+                    Ui.dp(this, 6), Ui.dp(this, 6));
             yearHead.addView(Ui.text(this, yearEntry.getKey() + " 年",
-                    14f, Ui.TEXT, true), new LinearLayout.LayoutParams(
+                    15f, Ui.TEXT, true), new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             yearHead.addView(Ui.text(this, yearCount + " 个 · " + Ui.bytes(yearBytes),
-                    8.5f, Ui.MUTED, false));
+                    10f, Ui.MUTED, false));
             drawerContent.addView(yearHead);
 
             for (Map.Entry<String, List<MediaItem>> monthEntry
@@ -1393,23 +1452,23 @@ public final class MainActivity extends Activity {
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(Ui.dp(this, 10), Ui.dp(this, 8),
-                        Ui.dp(this, 6), Ui.dp(this, 8));
-                row.setBackground(Ui.round(Ui.CARD_2, 9f, this));
+                row.setPadding(Ui.dp(this, 12), Ui.dp(this, 10),
+                        Ui.dp(this, 8), Ui.dp(this, 10));
+                row.setBackground(Ui.round(Ui.CARD_2, 12f, this));
                 LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rowParams.bottomMargin = Ui.dp(this, 3);
+                rowParams.bottomMargin = Ui.dp(this, 4);
                 row.setLayoutParams(rowParams);
+                row.setClickable(true);
+                row.setOnClickListener(v -> applyDateView(
+                        monthStart, monthEnd, "month", key, false, key));
 
                 LinearLayout info = new LinearLayout(this);
                 info.setOrientation(LinearLayout.VERTICAL);
-                info.setClickable(true);
-                info.setOnClickListener(v -> applyDateView(
-                        monthStart, monthEnd, "month", key, false, key));
                 row.addView(info, new LinearLayout.LayoutParams(
                         0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 info.addView(Ui.text(this, key.substring(5) + " 月",
-                        12.5f, Ui.TEXT, true));
+                        14f, Ui.TEXT, true));
                 long bytes = 0;
                 int selectedCount = 0;
                 for (MediaItem item : items) {
@@ -1419,14 +1478,20 @@ public final class MainActivity extends Activity {
                 info.addView(Ui.text(this, String.format(Locale.CHINA,
                         "%d 个 · %s%s", items.size(), Ui.bytes(bytes),
                         selectedCount > 0 ? " · 已选 " + selectedCount : ""),
-                        9f, Ui.MUTED, false));
-                TextView select = Ui.text(this, "全选本月", 9.5f, Ui.ACCENT, true);
-                select.setPadding(Ui.dp(this, 6), Ui.dp(this, 5),
-                        Ui.dp(this, 6), Ui.dp(this, 5));
+                        10f, Ui.MUTED, false));
+                TextView select = Ui.text(this, "全选本月", 12.5f, Ui.ACCENT, true);
+                select.setGravity(Gravity.CENTER);
+                select.setPadding(Ui.dp(this, 12), Ui.dp(this, 8),
+                        Ui.dp(this, 12), Ui.dp(this, 8));
+                select.setBackground(
+                        Ui.bordered(0x332F7BFF, 10f, 0xFF4A5480, this));
                 select.setClickable(true);
                 select.setOnClickListener(v -> applyDateView(
                         monthStart, monthEnd, "month", key, true, key + " 月"));
-                row.addView(select);
+                LinearLayout.LayoutParams selectParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 38));
+                selectParams.setMarginStart(Ui.dp(this, 8));
+                row.addView(select, selectParams);
                 drawerContent.addView(row);
             }
             View spacer = new View(this);
@@ -1453,20 +1518,20 @@ public final class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(Ui.dp(this, 8), Ui.dp(this, 9),
-                    Ui.dp(this, 4), Ui.dp(this, 9));
-            row.setBackground(Ui.round(Ui.CARD_2, 9f, this));
+            row.setPadding(Ui.dp(this, 12), Ui.dp(this, 10),
+                    Ui.dp(this, 8), Ui.dp(this, 10));
+            row.setBackground(Ui.round(Ui.CARD_2, 12f, this));
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rowParams.bottomMargin = Ui.dp(this, 3);
+            rowParams.bottomMargin = Ui.dp(this, 4);
             row.setLayoutParams(rowParams);
+            row.setClickable(true);
+            row.setOnClickListener(v -> applyAlbumView(album, false));
             LinearLayout info = new LinearLayout(this);
             info.setOrientation(LinearLayout.VERTICAL);
-            info.setClickable(true);
-            info.setOnClickListener(v -> applyAlbumView(album, false));
             row.addView(info, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            info.addView(Ui.text(this, shortAlbum(album), 12f, Ui.TEXT, true));
+            info.addView(Ui.text(this, shortAlbum(album), 14f, Ui.TEXT, true));
             long bytes = 0;
             int selectedCount = 0;
             for (MediaItem item : items) {
@@ -1476,13 +1541,19 @@ public final class MainActivity extends Activity {
             info.addView(Ui.text(this, String.format(Locale.CHINA,
                     "%d 个 · %s%s", items.size(), Ui.bytes(bytes),
                     selectedCount > 0 ? " · 已选 " + selectedCount : ""),
-                    8.5f, Ui.MUTED, false));
-            TextView select = Ui.text(this, "全选", 9.5f, Ui.ACCENT, true);
-            select.setPadding(Ui.dp(this, 6), Ui.dp(this, 5),
-                    Ui.dp(this, 6), Ui.dp(this, 5));
+                    10f, Ui.MUTED, false));
+            TextView select = Ui.text(this, "全选", 12.5f, Ui.ACCENT, true);
+            select.setGravity(Gravity.CENTER);
+            select.setPadding(Ui.dp(this, 12), Ui.dp(this, 8),
+                    Ui.dp(this, 12), Ui.dp(this, 8));
+            select.setBackground(
+                    Ui.bordered(0x332F7BFF, 10f, 0xFF4A5480, this));
             select.setClickable(true);
             select.setOnClickListener(v -> applyAlbumView(album, true));
-            row.addView(select);
+            LinearLayout.LayoutParams selectParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 38));
+            selectParams.setMarginStart(Ui.dp(this, 8));
+            row.addView(select, selectParams);
             drawerContent.addView(row);
         }
     }

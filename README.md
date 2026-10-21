@@ -1,14 +1,14 @@
 # Klean
 
-> **不 Root 的安卓存储清理与实况照片压缩工具。**
-> 电脑端走 ADB 审计与压缩，手机端可以完全离线运行。先看清空间去哪了，再决定删什么。
+> **不 Root 的安卓存储管家：审计、清理、压缩、备份、恢复。**
+> 电脑端用 ADB 看清空间去向；手机端离线压缩实况照片与视频，原片自动备份，随时可恢复。
 
 [![CI](https://github.com/KKKKahn/klean/actions/workflows/ci.yml/badge.svg)](https://github.com/KKKKahn/klean/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
 [![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
-[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0)
+[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0)
 
 `klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
@@ -22,7 +22,7 @@
 
 > **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
 >
-> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
+> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
 
 
 ---
@@ -70,20 +70,21 @@
 
 ## Android 应用
 
-[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0) · Android 10 及以上 · 无需 Root、无需电脑
+[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0) · Android 10 及以上 · 无需 Root、无需电脑
 
-Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需要 ADB：
+Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需要 ADB。打开先选择「实况照片」或「普通视频」，两条赛道的列表、选择、历史与备份完全独立：
 
 - **实况照片 + 普通视频** 两条独立赛道，自动识别同名的 JPG + MP4 配对，只处理伴生 MP4。
-- 三列相册网格；顶部筛选图标打开 Mac 式浏览面板：按年份/月份浏览，点月份查看整月；月份内容按日期分组，每天一个勾选栏可「全选本日」，顶部可「全选本月」。
+- 三列相册网格；左上角返回模式选择，右上角漏斗图标打开 Mac 式浏览面板：按年份/月份浏览，点月份查看整月；月份内容按日期分组，每天一个勾选栏可「全选本日」，顶部可「全选本月」。
 - 长按后手指滑过多少张就选中多少张，滑到边缘会继续滚动。
-- 支持按相册浏览与全选；日期范围从浏览器底部选择。
+- 支持按相册浏览与全选；日期范围从浏览面板底部选择。
 - 压缩状态筛选（全部 / 未压缩 / 已压缩）、按日期全选（某一天 / 某个月 / 日期范围，自动勾选范围内未压缩项）、按时间 / 大小排序。
+- 所有按钮按 40–48dp 触控尺寸设计；底部固定显示已选数量与「预览 / 开始压缩」大按钮。
 - 三档压缩质量；MediaCodec 硬件编码，实测实况短片段约 **2.7–7.1× 实时**，每张约 0.3–0.5 秒。
 - 压缩完成后先进入结果页：逐条预览压缩版、查看节省比例和速度，勾选后才应用。
 - 应用前自动把原 MP4 备份到 App 私有目录，原子替换、MD5 校验，JPG 定格画面永不修改。
 - 保留 vivo 的 `vivoMediaExtInfo` uuid box；HDR / 10-bit 等不安全格式会跳过并说明原因。
-- 顶部「备份」入口可以查看所有原片批次、预览、勾选恢复或删除；恢复后自动移除压缩历史。
+- 右上角 ⋮ 菜单里是「原片备份」与「重新扫描」；备份页可按批次查看、预览、勾选恢复或删除，恢复后自动移除压缩历史。
 - 全部在本机完成，App 不申请联网权限。
 
 安装说明：
@@ -670,17 +671,19 @@ docs/           # 安全模型、设计、兼容性
 
 ## English
 
-**Klean** is a cross-platform CLI that audits and safely cleans Android storage over ADB — no root, no `pm clear`, no system modifications.
+**Klean** is a no-root Android storage manager with two ways to run: a cross-platform ADB CLI plus a native macOS app that audits and compresses from your computer, and a fully offline Android app that compresses live photos and videos, backs up the originals and restores them on-device.
 
 - `scan` / `report`: inventory `/sdcard`, classify files, generate Markdown + HTML reports.
 - `junk`: delete only whitelisted cache/thumbnail/temp/log directories (dry-run by default).
 - `dupes`: byte-identical duplicates via on-device MD5, keeping the copy in the main directory.
 - `live`: identify live-photo companion MP4s (the usual cause of a huge “Other files” bucket), with optional backup and deletion while keeping every JPG.
 - `apps`: per-package external storage usage.
+- macOS app: native launchpad with bundled adb, ffmpeg and ffprobe; live-photo workbench in a WKWebView.
+- Android APK: pick live photos or videos on launch, browse by year/month, select a whole day or month, compress with MediaCodec, preview results, back up originals atomically and restore them later.
 
-Requirements: Python 3.9+, Android Platform Tools, Android 8+. iPhone is not supported.
+Requirements: Python 3.9+ for the CLI; macOS 12+ on Apple Silicon for the desktop app; Android 10+ for the offline APK. iPhone is not supported.
 
-Safety: read-only by default; destructive commands require `--apply`/`--delete`; every deletion is recorded in a local TSV manifest; privacy space / app clones (secondary users) are never touched.
+Safety: read-only by default; destructive commands require `--apply`/`--delete`; every deletion is recorded in a local TSV manifest; privacy space / app clones (secondary users) are never touched. The Android app never modifies JPG stills, backs up every original MP4 before replacing it and verifies the result with MD5.
 
 ```bash
 pipx install git+https://github.com/KKKKahn/klean.git

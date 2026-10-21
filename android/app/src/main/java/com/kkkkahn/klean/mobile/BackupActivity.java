@@ -116,30 +116,37 @@ public final class BackupActivity extends Activity {
         top.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(top);
 
-        TextView back = Ui.text(this, "←", 22f, Ui.TEXT, true);
+        TextView back = Ui.text(this, "←", 26f, Ui.TEXT, true);
         back.setGravity(Gravity.CENTER);
-        back.setPadding(Ui.dp(this, 2), 0, Ui.dp(this, 12), 0);
         back.setClickable(true);
         back.setOnClickListener(v -> {
             if (changed) setResult(RESULT_OK);
             finish();
         });
-        top.addView(back);
+        top.addView(back, new LinearLayout.LayoutParams(
+                Ui.dp(this, 48), Ui.dp(this, 48)));
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        top.addView(titles, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        titles.addView(Ui.text(this, liveMode ? "实况原片备份" : "视频原片备份", 20f, Ui.TEXT, true));
-        summary = Ui.text(this, "正在读取备份…", 10f, Ui.MUTED, false);
+        LinearLayout.LayoutParams titlesParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titlesParams.setMarginStart(Ui.dp(this, 6));
+        top.addView(titles, titlesParams);
+        titles.addView(Ui.text(this, liveMode ? "实况原片备份" : "视频原片备份", 21f, Ui.TEXT, true));
+        summary = Ui.text(this, "正在读取备份…", 10.5f, Ui.MUTED, false);
         summary.setPadding(0, Ui.dp(this, 3), 0, 0);
         titles.addView(summary);
 
-        TextView deleteAll = Ui.text(this, "删除全部", 10.5f, Ui.DANGER, false);
-        deleteAll.setPadding(Ui.dp(this, 8), Ui.dp(this, 6),
-                Ui.dp(this, 8), Ui.dp(this, 6));
+        TextView deleteAll = Ui.text(this, "删除全部", 12.5f, Ui.DANGER, true);
+        deleteAll.setGravity(Gravity.CENTER);
+        deleteAll.setPadding(Ui.dp(this, 13), Ui.dp(this, 9),
+                Ui.dp(this, 13), Ui.dp(this, 9));
+        deleteAll.setBackground(Ui.bordered(0x22FF6B81, 10f, 0xFF4A2A36, this));
         deleteAll.setClickable(true);
         deleteAll.setOnClickListener(v -> confirmDeleteAll());
-        top.addView(deleteAll);
+        LinearLayout.LayoutParams deleteAllParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40));
+        deleteAllParams.setMarginStart(Ui.dp(this, 6));
+        top.addView(deleteAll, deleteAllParams);
         return header;
     }
 
@@ -171,29 +178,35 @@ public final class BackupActivity extends Activity {
 
     private View buildBottomBar() {
         LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(Ui.dp(this, 18), Ui.dp(this, 9),
-                Ui.dp(this, 18), Ui.dp(this, 9));
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 9),
+                Ui.dp(this, 14), Ui.dp(this, 10));
         bar.setBackground(Ui.bordered(Ui.CARD, 0f, Ui.BORDER, this));
-        selectionInfo = Ui.text(this, "已选 0 个 · 0 B", 11.5f, Ui.TEXT, true);
-        bar.addView(selectionInfo, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        selectionInfo = Ui.text(this, "已选 0 个 · 0 B", 14f, Ui.TEXT, true);
+        bar.addView(selectionInfo);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionsParams.topMargin = Ui.dp(this, 8);
+        bar.addView(actions, actionsParams);
+
         restoreButton = Ui.button(this, "恢复所选", false);
-        restoreButton.setTextSize(11f);
-        restoreButton.setPadding(Ui.dp(this, 10), Ui.dp(this, 8),
-                Ui.dp(this, 10), Ui.dp(this, 8));
+        restoreButton.setTextSize(14f);
         restoreButton.setOnClickListener(v -> restoreSelected());
-        bar.addView(restoreButton);
+        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 46), 1f);
+        restoreParams.setMarginEnd(Ui.dp(this, 8));
+        actions.addView(restoreButton, restoreParams);
+
         deleteButton = Ui.button(this, "删除所选", false);
-        deleteButton.setTextSize(11f);
-        deleteButton.setPadding(Ui.dp(this, 10), Ui.dp(this, 8),
-                Ui.dp(this, 10), Ui.dp(this, 8));
-        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        deleteParams.setMarginStart(Ui.dp(this, 6));
-        bar.addView(deleteButton, deleteParams);
+        deleteButton.setTextSize(14f);
+        deleteButton.setTextColor(Ui.DANGER);
+        deleteButton.setBackground(Ui.bordered(0x33FF6B81, 12f, 0xFF6B3040, this));
         deleteButton.setOnClickListener(v -> confirmDeleteSelected());
+        actions.addView(deleteButton, new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 46), 1f));
         updateSelection();
         return bar;
     }
@@ -236,12 +249,12 @@ public final class BackupActivity extends Activity {
             bytes += batch.bytes();
         }
         summary.setText(String.format(Locale.CHINA,
-                "%d 个原片 · %s · App 私有备份（卸载 App 会丢失）", count, Ui.bytes(bytes)));
+                "%d 个原片 · %s", count, Ui.bytes(bytes)));
         if (batches.isEmpty()) {
             TextView empty = Ui.text(this,
-                    liveMode ? "还没有实况原片备份。\n应用压缩结果前会自动备份到这里。"
-                            : "还没有视频原片备份。\n应用压缩结果前会自动备份到这里。",
-                    13f, Ui.MUTED, false);
+                    liveMode ? "还没有实况原片备份。\n应用压缩结果前会自动备份到这里。\n备份存放在 App 私有目录，卸载 App 会丢失。"
+                            : "还没有视频原片备份。\n应用压缩结果前会自动备份到这里。\n备份存放在 App 私有目录，卸载 App 会丢失。",
+                    14f, Ui.MUTED, false);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, Ui.dp(this, 80), 0, 0);
             content.addView(empty);
@@ -271,9 +284,16 @@ public final class BackupActivity extends Activity {
         headText.setOrientation(LinearLayout.VERTICAL);
         head.addView(headText, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        headText.addView(Ui.text(this, batchLabel(batch), 12.5f, Ui.TEXT, true));
+        headText.addView(Ui.text(this, batchLabel(batch), 14f, Ui.TEXT, true));
         headText.addView(Ui.text(this, batch.entries.size() + " 个 · "
-                + Ui.bytes(batch.bytes()), 9.5f, Ui.MUTED, false));
+                + Ui.bytes(batch.bytes()), 10.5f, Ui.MUTED, false));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        actionParams.topMargin = Ui.dp(this, 9);
+        card.addView(actions, actionParams);
 
         TextView select = smallButton("全选本批", false);
         select.setOnClickListener(v -> {
@@ -285,18 +305,18 @@ public final class BackupActivity extends Activity {
             }
             render();
         });
-        head.addView(select);
+        actions.addView(select, actionCell(0));
         TextView restore = smallButton("恢复本批", false);
         restore.setOnClickListener(v -> confirmRestore(new ArrayList<>(batch.entries)));
-        head.addView(restore);
+        actions.addView(restore, actionCell(1));
         TextView delete = smallButton("删除本批", true);
         delete.setOnClickListener(v -> confirmDelete(new ArrayList<>(batch.entries)));
-        head.addView(delete);
+        actions.addView(delete, actionCell(2));
 
         TextView hint = Ui.text(this,
-                "原片备份 · 可预览、恢复或删除；删除不可撤销",
-                9f, Ui.MUTED, false);
-        hint.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 3));
+                "App 私有备份 · 卸载 App 会丢失 · 删除不可撤销",
+                10f, Ui.MUTED, false);
+        hint.setPadding(0, Ui.dp(this, 9), 0, Ui.dp(this, 3));
         card.addView(hint);
 
         for (Storage.BackupRecord record : batch.entries) {
@@ -309,7 +329,7 @@ public final class BackupActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 5));
+        row.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
         String key = key(batch, record);
 
         CheckBox check = new CheckBox(this);
@@ -323,7 +343,7 @@ public final class BackupActivity extends Activity {
                 },
                 new int[]{Ui.ACCENT, 0xFF59627C}));
         row.addView(check, new LinearLayout.LayoutParams(
-                Ui.dp(this, 30), Ui.dp(this, 38)));
+                Ui.dp(this, 34), Ui.dp(this, 42)));
 
         ImageView thumb = new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -337,7 +357,7 @@ public final class BackupActivity extends Activity {
             }
         });
         row.addView(thumb, new LinearLayout.LayoutParams(
-                Ui.dp(this, 52), Ui.dp(this, 39)));
+                Ui.dp(this, 62), Ui.dp(this, 46)));
         File file = record.file();
         if (file != null) {
             thumbnails.loadFile("backup:" + key, file, thumb);
@@ -353,7 +373,7 @@ public final class BackupActivity extends Activity {
         textParams.setMarginStart(Ui.dp(this, 9));
         row.addView(texts, textParams);
         String name = record.path.substring(record.path.lastIndexOf('/') + 1);
-        TextView title = Ui.text(this, name, 10.5f, Ui.TEXT, false);
+        TextView title = Ui.text(this, name, 11.5f, Ui.TEXT, true);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         texts.addView(title);
@@ -362,16 +382,21 @@ public final class BackupActivity extends Activity {
                 .format(new Date(record.mtime > 0 ? record.mtime : System.currentTimeMillis()));
         texts.addView(Ui.text(this, String.format(Locale.CHINA,
                 "%s · %s · %s", date, kind, Ui.bytes(record.originalSize)),
-                9f, Ui.MUTED, false));
+                10f, Ui.MUTED, false));
 
-        TextView preview = Ui.text(this, "预览", 10f, Ui.ACCENT, true);
-        preview.setPadding(Ui.dp(this, 7), Ui.dp(this, 4),
-                Ui.dp(this, 7), Ui.dp(this, 4));
+        TextView preview = Ui.text(this, "预览", 12f, Ui.ACCENT, true);
+        preview.setGravity(Gravity.CENTER);
+        preview.setPadding(Ui.dp(this, 11), Ui.dp(this, 7),
+                Ui.dp(this, 11), Ui.dp(this, 7));
+        preview.setBackground(Ui.bordered(0x332F7BFF, 9f, 0xFF4A5480, this));
         preview.setClickable(true);
         preview.setOnClickListener(v -> {
             if (file != null) preview(file, record.path);
         });
-        row.addView(preview);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 38));
+        previewParams.setMarginStart(Ui.dp(this, 6));
+        row.addView(preview, previewParams);
 
         row.setOnClickListener(v -> {
             if (selected.contains(key)) selected.remove(key);
@@ -383,15 +408,22 @@ public final class BackupActivity extends Activity {
     }
 
     private TextView smallButton(String text, boolean danger) {
-        TextView view = Ui.text(this, text, 9.5f, danger ? Ui.DANGER : Ui.MUTED, false);
-        view.setPadding(Ui.dp(this, 6), Ui.dp(this, 4),
-                Ui.dp(this, 6), Ui.dp(this, 4));
+        TextView view = Ui.text(this, text, 12f, danger ? Ui.DANGER : Ui.TEXT, true);
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(Ui.dp(this, 8), Ui.dp(this, 8),
+                Ui.dp(this, 8), Ui.dp(this, 8));
+        view.setBackground(danger
+                ? Ui.bordered(0x22FF6B81, 10f, 0xFF4A2A36, this)
+                : Ui.bordered(0x33191F31, 10f, Ui.BORDER, this));
         view.setClickable(true);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMarginStart(Ui.dp(this, 4));
-        view.setLayoutParams(params);
         return view;
+    }
+
+    private LinearLayout.LayoutParams actionCell(int index) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 42), 1f);
+        if (index > 0) params.setMarginStart(Ui.dp(this, 7));
+        return params;
     }
 
     private String key(Storage.BackupBatch batch, Storage.BackupRecord record) {
