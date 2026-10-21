@@ -160,12 +160,24 @@ function notifyNativeTheme(theme) {
   }
 }
 
+const SUN_ICON =
+  '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">' +
+  '<circle cx="12" cy="12" r="4"></circle>' +
+  '<path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>' +
+  '</svg>';
+const MOON_ICON =
+  '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>' +
+  '</svg>';
+
 function syncThemeButton() {
   const button = $('theme-btn');
   if (!button) return;
   const dark = effectiveTheme() === 'dark';
-  button.textContent = dark ? '浅色' : '深色';
-  button.title = dark ? '切换到浅色主题' : '切换到深色主题';
+  button.innerHTML = dark ? MOON_ICON : SUN_ICON;
+  const label = dark ? '切换到浅色主题' : '切换到深色主题';
+  button.title = label;
+  button.setAttribute('aria-label', label);
 }
 
 function applyTheme(theme, persist) {

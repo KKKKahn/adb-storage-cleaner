@@ -222,6 +222,11 @@ button { cursor: pointer; }
 .ghost:disabled { opacity: 0.42; cursor: not-allowed; }
 .ghost.danger-btn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 .ghost.danger-btn:hover { border-color: var(--danger); background: var(--danger-soft); }
+.theme-toggle {
+  width: 38px; min-height: 36px; padding: 0;
+  display: grid; place-items: center;
+}
+.theme-toggle svg { display: block; }
 .link { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; }
 .link:hover { color: var(--accent-strong); text-decoration: underline; }
 
