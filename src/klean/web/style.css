@@ -111,12 +111,16 @@ button { cursor: pointer; }
 
 .brand { display: flex; align-items: center; gap: 12px; min-width: 250px; }
 .logo {
-  width: 40px; height: 40px; border-radius: 13px;
+  width: 40px; height: 40px;
   display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--accent), var(--violet));
-  color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 0.4px;
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
+  background: none; box-shadow: none;
   user-select: none;
+}
+.logo .bolt {
+  width: 21px; height: 31px;
+  background: linear-gradient(165deg, var(--accent), var(--violet));
+  clip-path: polygon(60% 0, 8% 56%, 44% 56%, 34% 100%, 92% 40%, 55% 40%);
+  filter: drop-shadow(0 3px 8px color-mix(in srgb, var(--accent) 35%, transparent));
 }
 .brand h1 { font-size: 17px; margin: 0; letter-spacing: 0.2px; }
 #device-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }

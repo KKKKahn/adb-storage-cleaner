@@ -7,6 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
+[![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/latest)
 
 `klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
@@ -18,12 +19,16 @@
 
 > iPhone 不支持。iOS 没有 ADB 这类通用调试通道，清理方式完全不同。
 
+> **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/latest) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
+
+
 ---
 
 ## 目录
 
 - [为什么做这个](#为什么做这个)
 - [功能](#功能)
+- [macOS 应用](#macos-应用)
 - [安全模型](#安全模型先读)
 - [安装](#安装)
 - [快速开始](#快速开始)
@@ -37,6 +42,26 @@
 - [免责声明](#免责声明)
 
 ---
+
+## macOS 应用
+
+[下载最新版 macOS 应用](https://github.com/KKKKahn/klean/releases/latest)
+
+- 面向 Apple Silicon（M1–M6），macOS 12 Monterey 及以上。
+- 内置 adb、ffmpeg、ffprobe 与 Python 运行时，不需要自己安装依赖。
+- 打开 App → 按提示连接手机并开启 USB 调试 → 识别后自动进入工作台（原生窗口 + WKWebView）。
+- 使用中拔线会提示断开，重新连接并解锁后自动恢复。
+- App 为 ad-hoc 签名、未公证：第一次打开请右键 App →「打开」；或在「系统设置 → 隐私与安全性」里选择「仍要打开」。
+- 所有处理都在本机完成，不上传文件。
+
+从源码构建：
+
+```bash
+./packaging/macos/build.sh
+# 输出 dist/klean-<version>-macos-arm64.dmg
+```
+
+构建脚本会下载 adb 与 ffmpeg；需要 Python 3.9+ 和网络。
 
 ## 为什么做这个
 
@@ -165,26 +190,6 @@ python3 -m venv .venv
 . .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
 ```
-
-## macOS 应用
-
-[下载最新版 macOS 应用](https://github.com/KKKKahn/klean/releases/latest)
-
-- 面向 Apple Silicon（M1–M6），macOS 12 Monterey 及以上。
-- 内置 adb、ffmpeg、ffprobe 与 Python 运行时，不需要自己安装依赖。
-- 打开 App → 按提示连接手机并开启 USB 调试 → 识别后自动进入工作台（原生窗口 + WKWebView）。
-- 使用中拔线会提示断开，重新连接并解锁后自动恢复。
-- App 为 ad-hoc 签名、未公证：第一次打开请右键 App →「打开」；或在「系统设置 → 隐私与安全性」里选择「仍要打开」。
-- 所有处理都在本机完成，不上传文件。
-
-从源码构建：
-
-```bash
-./packaging/macos/build.sh
-# 输出 dist/klean-<version>-macos-arm64.dmg
-```
-
-构建脚本会下载 adb 与 ffmpeg；需要 Python 3.9+ 和网络。
 
 ## 平台支持
 

@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和语义化版本。
 
+## [0.3.2] - 2026-10-21
+
+### Changed
+
+- Studio 顶栏和启动页改用透明背景的单个闪电标识，移除 K 字与渐变方块；闪电直接落在页面背景上。
+
 ## [0.3.1] - 2026-10-21
 
 ### Fixed

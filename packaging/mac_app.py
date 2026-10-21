@@ -68,15 +68,15 @@ WAITING_HTML = """<!doctype html>
   }
   .card { width: min(620px, 88vw); padding: 42px 44px; text-align: center; }
   .logo {
-    width: 78px; height: 78px; margin: 0 auto 20px; border-radius: 22px;
+    width: 78px; height: 78px; margin: 0 auto 20px;
     display: grid; place-items: center;
-    background: linear-gradient(135deg, #4f6bff, #7c3aed);
-    box-shadow: 0 14px 36px rgba(91, 115, 255, .35);
+    background: none; box-shadow: none;
   }
   .bolt {
-    width: 30px; height: 42px; background: #fff;
+    width: 36px; height: 54px;
+    background: linear-gradient(160deg, #7c8cff, #a78bfa);
     clip-path: polygon(60% 0, 8% 56%, 44% 56%, 34% 100%, 92% 40%, 55% 40%);
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,.25));
+    filter: drop-shadow(0 6px 18px rgba(91, 115, 255, .35));
   }
   h1 { margin: 0; font-size: 32px; letter-spacing: -.5px; }
   .sub { margin: 8px 0 30px; color: #9aa6bd; font-size: 14px; }
