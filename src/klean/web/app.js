@@ -143,8 +143,58 @@ function showNotice(message, tone) {
 
 /* --------------------------------------------------------------- bootstrap */
 
+const THEME_KEY = 'klean-theme';
+
+function systemTheme() {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function effectiveTheme() {
+  return document.documentElement.dataset.theme || systemTheme();
+}
+
+function notifyNativeTheme(theme) {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.set_theme) {
+    const result = window.pywebview.api.set_theme(theme);
+    if (result && result.catch) result.catch(function () {});
+  }
+}
+
+function syncThemeButton() {
+  const button = $('theme-btn');
+  if (!button) return;
+  const dark = effectiveTheme() === 'dark';
+  button.textContent = dark ? '浅色' : '深色';
+  button.title = dark ? '切换到浅色主题' : '切换到深色主题';
+}
+
+function applyTheme(theme, persist) {
+  document.documentElement.dataset.theme = theme;
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (error) {}
+  }
+  syncThemeButton();
+  notifyNativeTheme(theme);
+}
+
+function toggleTheme() {
+  applyTheme(effectiveTheme() === 'dark' ? 'light' : 'dark', true);
+}
+
+function initTheme() {
+  syncThemeButton();
+  notifyNativeTheme(effectiveTheme());
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+    if (!document.documentElement.dataset.theme) {
+      syncThemeButton();
+      notifyNativeTheme(systemTheme());
+    }
+  });
+}
+
 async function init() {
   bindEvents();
+  initTheme();
   setupInfiniteScroll();
   updateSelectionUI();
   await loadSummary();
@@ -2001,6 +2051,7 @@ function switchSideTab(tab) {
 }
 
 function bindEvents() {
+  $('theme-btn').addEventListener('click', toggleTheme);
   $('compress-btn').addEventListener('click', compressSelected);
   $('selected-view-btn').addEventListener('click', showSelected);
   $('clear-selection').addEventListener('click', function () {

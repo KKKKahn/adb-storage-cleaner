@@ -56,7 +56,7 @@ WAITING_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Klean</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh; display: grid; place-items: center;
@@ -74,7 +74,7 @@ WAITING_HTML = """<!doctype html>
   }
   .bolt {
     width: 36px; height: 54px;
-    background: linear-gradient(160deg, #7c8cff, #a78bfa);
+    background: linear-gradient(160deg, #38bdf8 0%, #6366f1 45%, #a855f7 75%, #f472b6 100%);
     clip-path: polygon(60% 0, 8% 56%, 44% 56%, 34% 100%, 92% 40%, 55% 40%);
     filter: drop-shadow(0 6px 18px rgba(91, 115, 255, .35));
   }
@@ -115,6 +115,25 @@ WAITING_HTML = """<!doctype html>
   }
   .overlay h2 { margin: 0 0 10px; font-size: 20px; }
   .overlay p { margin: 0; color: #9aa6bd; font-size: 13px; line-height: 1.7; }
+  @media (prefers-color-scheme: light) {
+    body {
+      background:
+        radial-gradient(900px 600px at 20% 0%, rgba(83, 96, 255, 0.12), transparent 60%),
+        radial-gradient(700px 500px at 100% 100%, rgba(168, 85, 247, 0.10), transparent 60%),
+        #f3f5f9;
+      color: #171a21;
+    }
+    .sub, #detail, .privacy { color: #687083; }
+    #status { color: #171a21; }
+    .steps { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.08); color: #3f4657; }
+    .steps b { color: #171a21; }
+    button { border-color: rgba(0,0,0,.12); background: rgba(0,0,0,.04); color: #171a21; }
+    .spinner { border-color: rgba(0,0,0,.12); border-top-color: #3f6df6; }
+    .overlay { background: rgba(243,245,249,.94); }
+    .overlay .panel { background: #fff; border-color: #dfe4ec; box-shadow: 0 24px 70px rgba(20,28,45,.18); }
+    .overlay h2 { color: #171a21; }
+    .overlay p { color: #687083; }
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -216,6 +235,23 @@ class Bridge:
 
     def retry(self) -> bool:
         self.retry_event.set()
+        return True
+
+    def set_theme(self, theme: str) -> bool:
+        with contextlib.suppress(Exception):
+            from AppKit import NSApp, NSAppearance
+            from PyObjCTools import AppHelper
+
+            name = (
+                "NSAppearanceNameDarkAqua"
+                if theme == "dark"
+                else "NSAppearanceNameAqua"
+            )
+
+            def apply() -> None:
+                NSApp.setAppearance_(NSAppearance.appearanceNamed_(name))
+
+            AppHelper.callAfter(apply)
         return True
 
 

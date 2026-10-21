@@ -70,6 +70,7 @@ echo "==> building app bundle"
   --add-binary "$FFPROBE:bin" \
   --add-data "$SRC/src/klean/web:klean/web" \
   --hidden-import webview.platforms.cocoa \
+  --hidden-import PyObjCTools.AppHelper \
   --exclude-module pytest --exclude-module ruff --exclude-module tkinter \
   --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide6 \
   --exclude-module gi \

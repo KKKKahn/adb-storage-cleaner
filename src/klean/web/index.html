@@ -3,9 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  try {
+    var savedTheme = localStorage.getItem('klean-theme');
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      document.documentElement.dataset.theme = savedTheme;
+    }
+  } catch (error) {}
+</script>
 <meta name="klean-token" content="__KLEAN_TOKEN__">
 <title>Klean Studio · 实况照片压缩</title>
-<link rel="stylesheet" href="/static/style.css?v=0.3.2">
+<link rel="stylesheet" href="/static/style.css?v=0.3.3">
 </head>
 <body>
 <header class="topbar">
@@ -24,6 +32,7 @@
     </button>
   </div>
   <div class="top-actions">
+    <button id="theme-btn" class="ghost" type="button" title="切换浅色/深色">浅色</button>
     <button id="refresh-btn" class="ghost" type="button">刷新</button>
     <button id="rescan-btn" class="ghost" type="button">重新扫描</button>
   </div>
@@ -193,6 +202,6 @@
 
 <div id="toast" class="toast hidden" role="status"></div>
 
-<script src="/static/app.js?v=0.3.2"></script>
+<script src="/static/app.js?v=0.3.3"></script>
 </body>
 </html>
