@@ -13,8 +13,8 @@
 </script>
 <meta name="klean-token" content="__KLEAN_TOKEN__">
 <title>Klean Video · 普通视频</title>
-<link rel="stylesheet" href="/static/style.css?v=0.4.1">
-<link rel="stylesheet" href="/static/video.css?v=0.4.1">
+<link rel="stylesheet" href="/static/style.css?v=0.5.2">
+<link rel="stylesheet" href="/static/video.css?v=0.5.2">
 </head>
 <body>
 <header class="topbar">
@@ -29,8 +29,18 @@
     <div class="stat"><span id="video-count">–</span><label>普通视频</label></div>
     <div class="stat"><span id="video-size">–</span><label>总大小</label></div>
     <div class="stat"><span id="video-compressed">–</span><label>已压缩</label></div>
+    <div class="stat" title="电脑上的实况与视频原片备份总占用">
+      <span id="backup-size">–</span><label>原片备份</label>
+    </div>
   </div>
   <div class="top-actions">
+    <button id="backup-btn" class="ghost backup-open-btn" type="button" title="查看、预览、恢复和清除原片备份">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7.5h16v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z"></path>
+        <path d="M3 4.5h18v3H3zM9.5 12h5"></path>
+      </svg>
+      <span>备份管理</span>
+    </button>
     <button id="mode-btn" class="ghost" type="button">模式</button>
     <button id="theme-btn" class="ghost theme-toggle" type="button" aria-label="切换主题" title="切换主题"></button>
     <button id="refresh-btn" class="ghost" type="button">刷新</button>
@@ -89,6 +99,14 @@
             <option value="2000000000">≥ 2 GB</option>
           </select>
         </label>
+        <div class="inline-field status-filter">
+          <span>显示</span>
+          <div id="compressed-filter" class="filter-seg" role="group" aria-label="压缩状态筛选">
+            <button type="button" class="filter-seg-btn active" data-value="all" aria-pressed="true">全部</button>
+            <button type="button" class="filter-seg-btn" data-value="uncompressed" aria-pressed="false">未压缩</button>
+            <button type="button" class="filter-seg-btn" data-value="compressed" aria-pressed="false">已压缩</button>
+          </div>
+        </div>
         <label class="inline-field">
           <span>排序</span>
           <select id="sort-select">
@@ -98,6 +116,14 @@
         </label>
         <button id="largest-btn" class="ghost" type="button">选最大的 50 个</button>
         <span id="filter-hint" class="sub"></span>
+      </div>
+      <div class="range-bar">
+        <span class="range-label">按日期范围</span>
+        <input id="range-start" type="date" aria-label="开始日期">
+        <span class="range-sep">—</span>
+        <input id="range-end" type="date" aria-label="结束日期">
+        <button id="range-select" class="ghost" type="button">选中范围内</button>
+        <span id="range-hint" class="sub"></span>
       </div>
       <div id="notice" class="notice hidden"></div>
     </div>
@@ -116,7 +142,10 @@
 
 <div class="compress-bar">
   <div class="selection-info">
-    <div><strong id="selected-count">0</strong> 个已选 · <span id="selected-size">0 B</span></div>
+    <div class="selection-line">
+      <div><strong id="selected-count">0</strong> 个已选 · <span id="selected-size">0 B</span></div>
+      <button id="clear-selected-btn" class="link clear-selected-btn" type="button" disabled>清空已选</button>
+    </div>
     <div id="batch-hint" class="sub"></div>
   </div>
   <div class="compress-controls">
@@ -143,6 +172,7 @@
 </div>
 
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/video.js?v=0.4.1"></script>
+<script src="/static/video.js?v=0.5.2"></script>
+<script src="/static/backups.js?v=0.5.2"></script>
 </body>
 </html>

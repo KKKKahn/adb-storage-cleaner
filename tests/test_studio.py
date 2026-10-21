@@ -22,6 +22,7 @@ from klean.studio import (
     _backup_sessions,
     _backup_verified,
     _compress_job,
+    _delete_backup_files,
     _delete_backup_session,
     _history_entry,
     _history_skip_reason,
@@ -31,8 +32,10 @@ from klean.studio import (
     _migrate_legacy_backups,
     _photo_payload,
     _read_backup_session,
+    _read_video_backup_session,
     _save_history,
     _string_list,
+    _video_backup_sessions,
     _write_restore_script,
     estimate_local_need,
 )
@@ -211,14 +214,18 @@ def studio_server(tmp_path, monkeypatch):
     import klean.studio as studio
 
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
+    monkeypatch.setattr(studio, "VIDEO_BACKUPS_DIR", tmp_path / "video-backups")
+    monkeypatch.setattr(studio, "BACKUP_THUMBS_DIR", tmp_path / "backup-thumbs")
     monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
     state = make_state()
     server = StudioServer(("127.0.0.1", 0), StudioHandler, state)
     state.port = server.server_port
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    client = APIClient(server.server_port)
+    client.state = state
     try:
-        yield APIClient(server.server_port)
+        yield client
     finally:
         server.shutdown()
         server.server_close()
@@ -458,6 +465,191 @@ def test_delete_backup_rejects_unknown(tmp_path, monkeypatch):
     monkeypatch.setattr(studio, "BACKUPS_DIR", tmp_path / "backups")
     with pytest.raises(BadRequest):
         _delete_backup_session("../etc")
+
+
+def test_api_photos_date_range_is_inclusive(studio_server):
+    status, data = studio_server.json(
+        "GET",
+        "/api/photos?start=2026-01-02&end=2026-01-04&token=test-token",
+    )
+    assert status == 200
+    assert data["start"] == "2026-01-02"
+    assert data["end"] == "2026-01-04"
+    assert [row["date"] for row in data["photos"]] == [
+        "2026-01-02",
+        "2026-01-02",
+        "2026-01-04",
+    ]
+    status, _ = studio_server.json(
+        "GET",
+        "/api/photos?start=2026-01-05&end=2026-01-02&token=test-token",
+    )
+    assert status == 400
+    status, _ = studio_server.json(
+        "GET",
+        "/api/photos?start=2026-1-2&end=2026-01-04&token=test-token",
+    )
+    assert status == 400
+
+
+def test_static_js_uses_javascript_content_type(studio_server):
+    connection = http.client.HTTPConnection("127.0.0.1", studio_server.port, timeout=10)
+    try:
+        connection.request("GET", "/static/backups.js")
+        response = connection.getresponse()
+        body = response.read()
+    finally:
+        connection.close()
+    assert response.status == 200
+    assert "javascript" in (response.getheader("Content-Type") or "")
+    assert b"KleanBackups" in body
+
+
+def test_read_video_backup_session(tmp_path, monkeypatch):
+    import klean.studio as studio
+
+    monkeypatch.setattr(studio, "VIDEO_BACKUPS_DIR", tmp_path / "video-backups")
+    session = tmp_path / "video-backups" / "20260103-040506"
+    write_manifest(
+        session,
+        [
+            [
+                "/sdcard/DCIM/Camera/VID_20260103_040506.mp4",
+                "-",
+                900,
+                400,
+                "a" * 32,
+                "b" * 32,
+                1792551907,
+            ]
+        ],
+    )
+    info = _read_video_backup_session(session)
+    assert info is not None
+    assert info["kind"] == "video"
+    assert info["count"] == 1
+    assert info["bytes"] == 900
+    entry = info["entries"][0]
+    assert entry["kind"] == "video"
+    assert entry["jpg"] == ""
+    assert entry["backup"] == (
+        "20260103-040506/sdcard/DCIM/Camera/VID_20260103_040506.mp4"
+    )
+    assert [row["session"] for row in _video_backup_sessions()] == ["20260103-040506"]
+
+
+def test_delete_backup_files_prunes_selected_entries(tmp_path, monkeypatch):
+    import klean.studio as studio
+
+    backup_root = tmp_path / "backups"
+    video_root = tmp_path / "video-backups"
+    monkeypatch.setattr(studio, "BACKUPS_DIR", backup_root)
+    monkeypatch.setattr(studio, "VIDEO_BACKUPS_DIR", video_root)
+    live_session = backup_root / "20260103-040506"
+    first_remote = "/sdcard/DCIM/Camera/IMG_20260103_040506.mp4"
+    second_remote = "/sdcard/DCIM/Camera/IMG_20260103_040507.mp4"
+    first_backup = "20260103-040506/sdcard/DCIM/Camera/IMG_20260103_040506.mp4"
+    second_backup = "20260103-040506/sdcard/DCIM/Camera/IMG_20260103_040507.mp4"
+    for backup in (first_backup, second_backup):
+        path = backup_root / backup
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"original")
+    write_manifest(
+        live_session,
+        [
+            [first_remote, first_remote[:-4] + ".jpg", 100, 50, "a" * 32, "b" * 32, 1],
+            [second_remote, second_remote[:-4] + ".jpg", 200, 90, "c" * 32, "d" * 32, 2],
+        ],
+    )
+    video_session = video_root / "20260103-050607"
+    video_remote = "/sdcard/DCIM/Camera/VID_20260103_050607.mp4"
+    video_backup = "20260103-050607/sdcard/DCIM/Camera/VID_20260103_050607.mp4"
+    video_path = video_root / video_backup
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path.write_bytes(b"original video")
+    write_manifest(
+        video_session,
+        [[video_remote, "-", 800, 300, "e" * 32, "f" * 32, 3]],
+    )
+
+    assert _delete_backup_files([{"kind": "live", "backup": first_backup}]) == 1
+    assert not (backup_root / first_backup).exists()
+    assert (backup_root / second_backup).exists()
+    manifest = (live_session / "manifest.tsv").read_text(encoding="utf-8")
+    assert "IMG_20260103_040506.mp4" not in manifest
+    assert "IMG_20260103_040507.mp4" in manifest
+    assert (live_session / "restore.sh").exists()
+
+    assert _delete_backup_files([{"kind": "video", "backup": video_backup}]) == 1
+    assert not video_session.exists()
+
+    assert _delete_backup_files([{"kind": "live", "backup": second_backup}]) == 1
+    assert not live_session.exists()
+
+    with pytest.raises(BadRequest):
+        _delete_backup_files([{"kind": "live", "backup": "../escape.mp4"}])
+
+
+def test_api_backups_includes_both_kinds(studio_server):
+    import klean.studio as studio
+
+    live_root = studio.BACKUPS_DIR
+    video_root = studio.VIDEO_BACKUPS_DIR
+    write_manifest(
+        live_root / "20260103-040506",
+        [
+            [
+                "/sdcard/DCIM/Camera/IMG_20260103_040506.mp4",
+                "/sdcard/DCIM/Camera/IMG_20260103_040506.jpg",
+                100,
+                50,
+                "a" * 32,
+                "b" * 32,
+                1,
+            ]
+        ],
+    )
+    video_backup = "20260104-050607/sdcard/DCIM/Camera/VID_20260104_050607.mp4"
+    write_manifest(
+        video_root / "20260104-050607",
+        [
+            [
+                "/sdcard/DCIM/Camera/VID_20260104_050607.mp4",
+                "-",
+                900,
+                400,
+                "c" * 32,
+                "d" * 32,
+                2,
+            ]
+        ],
+    )
+    target = video_root / video_backup
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"video bytes")
+
+    status, data = studio_server.json("GET", "/api/backups?token=test-token")
+    assert status == 200
+    assert data["sessions"][0]["kind"] == "live"
+    assert data["video_sessions"][0]["kind"] == "video"
+    assert data["total_bytes"] == 100
+    assert data["video_total_bytes"] == 900
+    assert data["all_total_bytes"] == 1000
+
+    status, body = studio_server.request(
+        "GET",
+        "/api/backups/file?kind=video&backup="
+        + urllib.parse.quote(video_backup)
+        + "&token=test-token",
+    )
+    assert status == 200
+    assert body == b"video bytes"
+
+    status, _ = studio_server.json(
+        "GET",
+        "/api/backups/file?kind=video&backup=../escape.mp4&token=test-token",
+    )
+    assert status == 400
 
 
 def test_migrate_legacy_backups(tmp_path, monkeypatch):

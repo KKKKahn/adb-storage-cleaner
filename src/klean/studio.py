@@ -66,6 +66,7 @@ STUDIO_DIR = state_dir() / "studio"
 JOBS_DIR = STUDIO_DIR / "jobs"
 THUMBS_DIR = STUDIO_DIR / "thumbs"
 VIDEO_THUMBS_DIR = STUDIO_DIR / "video-thumbs"
+BACKUP_THUMBS_DIR = STUDIO_DIR / "backup-thumbs"
 BACKUPS_DIR = data_dir() / "studio" / "backups"
 VIDEO_BACKUPS_DIR = data_dir() / "studio" / "video-backups"
 HISTORY_PATH = data_dir() / "studio" / "history.json"
@@ -496,6 +497,62 @@ def _video_payload(video: VideoItem, state: StudioState) -> Dict:
     }
 
 
+def _backup_thumb_path(kind: str, backup: str, size: int) -> Path:
+    return BACKUP_THUMBS_DIR / f"{_safe_sha1(kind + ':' + backup)}-{size}.jpg"
+
+
+def _make_backup_thumbnail(
+    state: StudioState, source: Path, kind: str, backup: str
+) -> Optional[Path]:
+    try:
+        size = source.stat().st_size
+    except OSError:
+        return None
+    target = _backup_thumb_path(kind, backup, size)
+    if target.exists() and target.stat().st_size > 0:
+        return target
+    ffmpeg = state.ffmpeg or "ffmpeg"
+    if not (shutil.which(ffmpeg) or os.path.exists(ffmpeg)):
+        return None
+    BACKUP_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name(f".{target.name}.{secrets.token_hex(3)}.jpg")
+    with state.thumb_sem:
+        if target.exists() and target.stat().st_size > 0:
+            return target
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-vf",
+                    f"thumbnail,scale={THUMB_WIDTH}:-2:flags=lanczos",
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "5",
+                    str(temp),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+            )
+            if result.returncode != 0 or not temp.exists() or temp.stat().st_size == 0:
+                return None
+            os.replace(temp, target)
+            return target
+        except (OSError, subprocess.SubprocessError):
+            return None
+        finally:
+            with contextlib.suppress(OSError):
+                if temp.exists():
+                    temp.unlink()
+
+
 def _video_thumb_path(video: VideoItem) -> Path:
     return VIDEO_THUMBS_DIR / f"{video.media_id}-{video.size}.jpg"
 
@@ -574,8 +631,11 @@ def _read_backup_session(session: Path) -> Optional[Dict]:
         return None
     if not entries:
         return None
+    for entry in entries:
+        entry["kind"] = "live"
     return {
         "session": session.name,
+        "kind": "live",
         "count": len(entries),
         "bytes": sum(entry["original_size"] for entry in entries),
         "restore_script": str(session / "restore.sh"),
@@ -583,15 +643,80 @@ def _read_backup_session(session: Path) -> Optional[Dict]:
     }
 
 
-def _delete_backup_session(session_name: str) -> int:
+def _read_video_backup_session(session: Path) -> Optional[Dict]:
+    manifest = session / "manifest.tsv"
+    if not manifest.exists():
+        return None
+    entries: List[Dict] = []
+    try:
+        with open(manifest, "r", encoding="utf-8") as handle:
+            handle.readline()
+            for line in handle:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 7:
+                    continue
+                mp4, original, new, old_md5, new_md5, mtime = (
+                    parts[0],
+                    parts[2],
+                    parts[3],
+                    parts[4],
+                    parts[5],
+                    parts[6],
+                )
+                if not mp4.startswith("/sdcard/"):
+                    continue
+                try:
+                    original_size = int(original)
+                    new_size = int(new)
+                    mtime_value = int(mtime)
+                except ValueError:
+                    continue
+                if not re.fullmatch(r"[0-9a-f]{32}", old_md5):
+                    continue
+                if not re.fullmatch(r"[0-9a-f]{32}", new_md5):
+                    continue
+                relative = "sdcard/" + mp4[len("/sdcard/") :]
+                date, time = _date_time_from_path(mp4)
+                entries.append(
+                    {
+                        "mp4": mp4,
+                        "jpg": "",
+                        "date": date,
+                        "time": time,
+                        "original_size": original_size,
+                        "new_size": new_size,
+                        "original_md5": old_md5,
+                        "new_md5": new_md5,
+                        "mtime": mtime_value,
+                        "backup": f"{session.name}/{relative}",
+                        "kind": "video",
+                    }
+                )
+    except OSError:
+        return None
+    if not entries:
+        return None
+    return {
+        "session": session.name,
+        "kind": "video",
+        "count": len(entries),
+        "bytes": sum(entry["original_size"] for entry in entries),
+        "restore_script": str(session / "restore.sh"),
+        "entries": entries,
+    }
+
+
+def _delete_backup_session(session_name: str, kind: str = "live") -> int:
+    root = VIDEO_BACKUPS_DIR if kind == "video" else BACKUPS_DIR
+    sessions = _video_backup_sessions() if kind == "video" else _backup_sessions()
     session = next(
-        (item for item in _backup_sessions() if item["session"] == session_name),
+        (item for item in sessions if item["session"] == session_name),
         None,
     )
     if session is None:
         raise BadRequest("备份批次不存在")
-    path = (BACKUPS_DIR / session_name).resolve()
-    base = BACKUPS_DIR.resolve()
+    path = (root / session_name).resolve()
+    base = root.resolve()
     try:
         path.relative_to(base)
     except ValueError as exc:
@@ -613,6 +738,143 @@ def _backup_sessions() -> List[Dict]:
         if info is not None:
             sessions.append(info)
     return sessions
+
+
+def _video_backup_sessions() -> List[Dict]:
+    if not VIDEO_BACKUPS_DIR.exists():
+        return []
+    sessions = []
+    for path in sorted(VIDEO_BACKUPS_DIR.iterdir(), reverse=True):
+        if not path.is_dir():
+            continue
+        info = _read_video_backup_session(path)
+        if info is not None:
+            sessions.append(info)
+    return sessions
+
+
+def _all_backup_sessions() -> List[Dict]:
+    sessions = _backup_sessions() + _video_backup_sessions()
+    sessions.sort(key=lambda item: item["session"], reverse=True)
+    return sessions
+
+
+def _directory_bytes(root: Path) -> int:
+    total = 0
+    seen_inodes = set()
+    if not root.exists():
+        return 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        key = (stat.st_dev, stat.st_ino)
+        if key in seen_inodes:
+            continue
+        seen_inodes.add(key)
+        total += stat.st_size
+    return total
+
+
+def _backup_sizes() -> Tuple[int, int]:
+    return _directory_bytes(BACKUPS_DIR), _directory_bytes(VIDEO_BACKUPS_DIR)
+
+
+def _find_backup_entry(kind: str, backup: str) -> Optional[Dict]:
+    sessions = _video_backup_sessions() if kind == "video" else _backup_sessions()
+    for session in sessions:
+        for entry in session["entries"]:
+            if entry["backup"] == backup:
+                return entry
+    return None
+
+
+def _prune_backup_session(root: Path, session_name: str) -> None:
+    """Drop manifest rows whose backup file was deleted, then remove empties."""
+    session = (root / session_name).resolve()
+    base = root.resolve()
+    try:
+        session.relative_to(base)
+    except ValueError:
+        return
+    if session.parent != base or not session.is_dir():
+        return
+    manifest = session / "manifest.tsv"
+    rows: List[List[str]] = []
+    if manifest.exists():
+        try:
+            with open(manifest, "r", encoding="utf-8") as handle:
+                handle.readline()
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 7 or not parts[0].startswith("/sdcard/"):
+                        continue
+                    relative = parts[0][len("/sdcard/") :]
+                    target = (session / "sdcard" / relative).resolve()
+                    try:
+                        target.relative_to(session)
+                    except ValueError:
+                        continue
+                    if target.is_file():
+                        rows.append(parts)
+        except OSError:
+            return
+    if not rows:
+        shutil.rmtree(session, ignore_errors=True)
+        return
+    header = ["mp4", "jpg", "original_size", "new_size", "original_md5", "new_md5", "mtime"]
+    with open(manifest, "w", encoding="utf-8") as handle:
+        handle.write("\t".join(header) + "\n")
+        for row in rows:
+            handle.write("\t".join(row) + "\n")
+    restore_rows = []
+    for row in rows:
+        relative = "sdcard/" + row[0][len("/sdcard/") :]
+        try:
+            mtime_value = int(row[6])
+        except ValueError:
+            mtime_value = 0
+        restore_rows.append((relative, row[0], mtime_value))
+    _write_restore_script(session, restore_rows)
+    for path in sorted(session.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_dir():
+            with contextlib.suppress(OSError):
+                path.rmdir()
+
+
+def _delete_backup_files(files: List[Dict]) -> int:
+    targets = {}
+    touched = set()
+    live_sessions = {item["session"]: item for item in _backup_sessions()}
+    video_sessions = {item["session"]: item for item in _video_backup_sessions()}
+    for item in files:
+        kind = str(item.get("kind", ""))
+        backup = str(item.get("backup", ""))
+        sessions = live_sessions if kind == "live" else video_sessions if kind == "video" else {}
+        session_name = backup.split("/", 1)[0]
+        session = sessions.get(session_name)
+        if session is None:
+            raise BadRequest("备份文件不存在")
+        entry = next(
+            (row for row in session["entries"] if row["backup"] == backup),
+            None,
+        )
+        if entry is None:
+            raise BadRequest("备份文件不存在")
+        path = _video_backup_file(backup) if kind == "video" else _backup_file(backup)
+        if path is None or not path.is_file():
+            raise BadRequest("备份文件不存在")
+        targets[(kind, backup)] = path
+        touched.add((kind, session_name))
+    for path in targets.values():
+        path.unlink()
+    for kind, session_name in touched:
+        root = VIDEO_BACKUPS_DIR if kind == "video" else BACKUPS_DIR
+        _prune_backup_session(root, session_name)
+    return len(targets)
 
 
 def _migrate_legacy_backups() -> None:
@@ -1687,6 +1949,87 @@ def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None
     job.message = f"已从备份恢复 {restored} 个"
 
 
+def _restore_video_backup_job(state: StudioState, job: Job, session_name: str) -> None:
+    """Restore regular videos directly from a persisted video backup session."""
+    session = next(
+        (item for item in _video_backup_sessions() if item["session"] == session_name),
+        None,
+    )
+    if session is None:
+        raise CompressError("备份批次不存在")
+    entries = {entry["mp4"]: entry for entry in session["entries"]}
+    restored = 0
+    for item in job.items:
+        with state.lock:
+            item.status = "running"
+        try:
+            entry = entries.get(item.mp4)
+            if entry is None:
+                raise CompressError("该视频不在备份清单中")
+            backup_path = _video_backup_file(entry["backup"])
+            if backup_path is None or not backup_path.exists():
+                raise CompressError("备份文件不存在或超出备份目录")
+            video = state.video_by_path.get(item.mp4)
+            if video is None:
+                raise CompressError("不在视频清单中")
+            with state.adb_lock:
+                probe = state.adb.sh(
+                    f"[ -f {sh_quote(item.mp4)} ] && echo FILE_OK; "
+                    f"md5sum {sh_quote(item.mp4)}",
+                    check=False,
+                )
+                lines = [line.strip() for line in probe.splitlines() if line.strip()]
+                if "FILE_OK" not in lines:
+                    raise CompressError("手机上的视频已不存在，跳过")
+                hash_line = next(
+                    (line for line in lines if re.match(r"^[0-9a-fA-F]{32}\b", line)),
+                    "",
+                )
+                if not hash_line:
+                    raise CompressError("无法读取手机视频 MD5，跳过")
+                current = hash_line.split()[0].lower()
+            if current == entry["original_md5"]:
+                item.reason = "手机已经是原始文件"
+            elif current == entry["new_md5"]:
+                _restore_one(
+                    state,
+                    backup_path,
+                    item.mp4,
+                    entry["original_md5"],
+                    entry["mtime"],
+                )
+                restored += 1
+            else:
+                raise CompressError("手机文件已变化，不是本工具生成的压缩版，跳过")
+            with state.lock:
+                item.original_size = entry["original_size"]
+                item.compressed_size = entry["new_size"]
+                item.original_md5 = entry["original_md5"]
+                item.compressed_md5 = entry["new_md5"]
+                item.mtime = entry["mtime"]
+                item.backup = entry["backup"]
+                item.status = "restored"
+                state.update_scan_size(video.path, entry["original_size"])
+                video.size = entry["original_size"]
+                state.video_history.pop(video.path, None)
+        except (CompressError, ADBError, OSError, ValueError) as exc:
+            with state.lock:
+                item.status = "error"
+                item.reason = str(exc)
+        except Exception as exc:  # keep one bad file from aborting a batch
+            with state.lock:
+                item.status = "error"
+                item.reason = f"{type(exc).__name__}: {exc}"
+        finally:
+            with state.lock:
+                job.done += 1
+    save_scan(state.scan)
+    with state.lock:
+        history_snapshot = dict(state.video_history)
+    _save_video_history(history_snapshot)
+    job.message = f"已从备份恢复 {restored} 个视频"
+
+
 def _scan_job(state: StudioState, job: Job) -> None:
     with state.lock:
         job.message = "正在扫描 /sdcard..."
@@ -2104,6 +2447,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
         if path in (
             "/static/app.js",
+            "/static/backups.js",
             "/static/style.css",
             "/static/video.js",
             "/static/video.css",
@@ -2137,19 +2481,21 @@ class StudioHandler(BaseHTTPRequestHandler):
         self._send_bytes(data, "text/html; charset=utf-8")
 
     def _serve_static(self, name: str) -> None:
-        content_types = {
-            "app.js": "application/javascript; charset=utf-8",
-            "video.js": "application/javascript; charset=utf-8",
-            "style.css": "text/css; charset=utf-8",
-            "video.css": "text/css; charset=utf-8",
-        }
+        if name.endswith(".js"):
+            content_type = "application/javascript; charset=utf-8"
+        elif name.endswith(".css"):
+            content_type = "text/css; charset=utf-8"
+        elif name.endswith(".svg"):
+            content_type = "image/svg+xml"
+        else:
+            content_type = "application/octet-stream"
         path = WEB_DIR / name
         if not path.exists():
             self._error(404, "未找到")
             return
         self._send_bytes(
             path.read_bytes(),
-            content_types.get(name, "application/octet-stream"),
+            content_type,
             cache_control="private, max-age=300",
         )
 
@@ -2164,10 +2510,13 @@ class StudioHandler(BaseHTTPRequestHandler):
                 compressed = sum(
                     1 for video in videos if _video_history_entry(self.state, video)
                 )
+                live_backup_bytes, video_backup_bytes = _backup_sizes()
                 payload = {
                     "count": len(videos),
                     "bytes": sum(video.size for video in videos),
                     "compressed_count": compressed,
+                    "backup_bytes": live_backup_bytes + video_backup_bytes,
+                    "video_backup_bytes": video_backup_bytes,
                     "free_bytes": shutil.disk_usage(str(state_dir())).free,
                     "suggested_batch_bytes": self.state.video_batch_suggestion(),
                     "device": {
@@ -2192,8 +2541,22 @@ class StudioHandler(BaseHTTPRequestHandler):
             date = (query.get("date") or [""])[0]
             month = (query.get("month") or [""])[0]
             album = (query.get("album") or [""])[0]
+            start = (query.get("start") or [""])[0]
+            end = (query.get("end") or [""])[0]
             with self.state.lock:
-                if month:
+                if start or end:
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) or not re.fullmatch(
+                        r"\d{4}-\d{2}-\d{2}", end
+                    ):
+                        raise BadRequest("start/end 格式必须是 YYYY-MM-DD")
+                    if start > end:
+                        raise BadRequest("start 不能晚于 end")
+                    videos = [
+                        video
+                        for video in self.state.videos
+                        if start <= video.date <= end
+                    ]
+                elif month:
                     if not re.fullmatch(r"\d{4}-\d{2}", month):
                         raise BadRequest("month 格式必须是 YYYY-MM")
                     videos = self.state.videos_for_month(month)
@@ -2235,6 +2598,28 @@ class StudioHandler(BaseHTTPRequestHandler):
             date = (query.get("date") or [""])[0]
             month = (query.get("month") or [""])[0]
             album = (query.get("album") or [""])[0]
+            start = (query.get("start") or [""])[0]
+            end = (query.get("end") or [""])[0]
+            if start or end:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) or not re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}", end
+                ):
+                    raise BadRequest("start/end 格式必须是 YYYY-MM-DD")
+                if start > end:
+                    raise BadRequest("start 不能晚于 end")
+                with self.state.lock:
+                    pairs = [
+                        pair for pair in self.state.pairs if start <= pair.date <= end
+                    ]
+                pairs.sort(key=lambda pair: (pair.date, pair.time))
+                self._send_json(
+                    {
+                        "start": start,
+                        "end": end,
+                        "photos": [_photo_payload(pair, self.state) for pair in pairs],
+                    }
+                )
+                return
             if month:
                 if not re.fullmatch(r"\d{4}-\d{2}", month):
                     raise BadRequest("month 格式必须是 YYYY-MM")
@@ -2315,13 +2700,42 @@ class StudioHandler(BaseHTTPRequestHandler):
         if path == "/api/backups":
             with self.state.lock:
                 sessions = _backup_sessions()
+                video_sessions = _video_backup_sessions()
+            live_bytes = sum(item["bytes"] for item in sessions)
+            video_bytes = sum(item["bytes"] for item in video_sessions)
             self._send_json(
                 {
                     "sessions": sessions,
+                    "video_sessions": video_sessions,
                     "backup_dir": str(BACKUPS_DIR),
-                    "total_bytes": sum(item["bytes"] for item in sessions),
+                    "video_backup_dir": str(VIDEO_BACKUPS_DIR),
+                    "total_bytes": live_bytes,
+                    "video_total_bytes": video_bytes,
+                    "all_total_bytes": live_bytes + video_bytes,
                 }
             )
+            return
+        if path in ("/api/backups/file", "/api/backups/thumb"):
+            kind = (query.get("kind") or [""])[0]
+            backup = (query.get("backup") or [""])[0]
+            if kind not in ("live", "video"):
+                raise BadRequest("kind 必须是 live 或 video")
+            if _find_backup_entry(kind, backup) is None:
+                raise BadRequest("备份文件不在清单中")
+            source = (
+                _video_backup_file(backup) if kind == "video" else _backup_file(backup)
+            )
+            if source is None or not source.is_file():
+                self._error(404, "备份文件不存在")
+                return
+            if path.endswith("/thumb"):
+                thumb = _make_backup_thumbnail(self.state, source, kind, backup)
+                if thumb is None:
+                    self._error(404, "备份缩略图不可用")
+                    return
+                self._send_file(thumb, "image/jpeg", "private, max-age=86400")
+            else:
+                self._send_file(source, "video/mp4", "private, max-age=300")
             return
         self._error(404, "未知 API")
 
@@ -2334,21 +2748,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.state.ffprobe
             and (shutil.which(self.state.ffprobe) or os.path.exists(self.state.ffprobe))
         )
-        backup_bytes = 0
-        seen_inodes = set()
-        if BACKUPS_DIR.exists():
-            for path in BACKUPS_DIR.rglob("*"):
-                if not path.is_file():
-                    continue
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                key = (stat.st_dev, stat.st_ino)
-                if key in seen_inodes:
-                    continue
-                seen_inodes.add(key)
-                backup_bytes += stat.st_size
+        live_backup_bytes, video_backup_bytes = _backup_sizes()
+        backup_bytes = live_backup_bytes + video_backup_bytes
         try:
             local_free = shutil.disk_usage(str(state_dir())).free
         except OSError:
@@ -2388,7 +2789,10 @@ class StudioHandler(BaseHTTPRequestHandler):
             "batch_suggestion": BATCH_SUGGESTION,
             "crf_range": [UI_CRF_MIN, UI_CRF_MAX],
             "backup_bytes": backup_bytes,
+            "live_backup_bytes": live_backup_bytes,
+            "video_backup_bytes": video_backup_bytes,
             "backup_dir": str(BACKUPS_DIR),
+            "video_backup_dir": str(VIDEO_BACKUPS_DIR),
             "local_free": local_free,
             "active_job": active_id,
         }
@@ -2729,23 +3133,44 @@ class StudioHandler(BaseHTTPRequestHandler):
             raise BadRequest("删除备份需要显式确认")
         if state.active_job() is not None:
             raise Busy("有任务在运行，完成后再删除备份")
+        files = payload.get("files")
+        if files is not None:
+            if not isinstance(files, list) or not all(
+                isinstance(item, dict)
+                and isinstance(item.get("kind"), str)
+                and isinstance(item.get("backup"), str)
+                for item in files
+            ):
+                raise BadRequest("files 必须是备份文件数组")
+            if not files:
+                raise BadRequest("没有选择要清除的备份")
+            with state.lock:
+                count = _delete_backup_files(files)
+            self._send_json({"deleted_sessions": 0, "deleted_files": count})
+            return
+        kind = str(payload.get("kind", "live"))
+        if kind not in ("live", "video"):
+            raise BadRequest("kind 必须是 live 或 video")
         session_name = str(payload.get("session", ""))
         if session_name == "*":
-            sessions = _backup_sessions()
+            sessions = _backup_sessions() + _video_backup_sessions()
             deleted_files = sum(item["count"] for item in sessions)
             for item in sessions:
-                _delete_backup_session(item["session"])
+                _delete_backup_session(item["session"], item["kind"])
             self._send_json(
                 {"deleted_sessions": len(sessions), "deleted_files": deleted_files}
             )
             return
-        count = _delete_backup_session(session_name)
+        count = _delete_backup_session(session_name, kind)
         self._send_json({"deleted_sessions": 1, "deleted_files": count})
 
     def _post_restore_backups(self, payload: Dict) -> None:
         state = self.state
         session_name = str(payload.get("session", ""))
-        sessions = _backup_sessions()
+        kind = str(payload.get("kind", "live"))
+        if kind not in ("live", "video"):
+            raise BadRequest("kind 必须是 live 或 video")
+        sessions = _video_backup_sessions() if kind == "video" else _backup_sessions()
         session = next((item for item in sessions if item["session"] == session_name), None)
         if session is None:
             raise BadRequest("备份批次不存在")
@@ -2770,7 +3195,11 @@ class StudioHandler(BaseHTTPRequestHandler):
         _start_thread(
             state,
             job,
-            lambda: _restore_backup_job(state, job, session_name),
+            lambda: (
+                _restore_video_backup_job(state, job, session_name)
+                if kind == "video"
+                else _restore_backup_job(state, job, session_name)
+            ),
         )
         self._send_json({"job_id": job.id}, 202)
 

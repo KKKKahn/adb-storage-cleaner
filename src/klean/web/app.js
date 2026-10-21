@@ -45,6 +45,7 @@ const state = {
   compressJob: null,
   uncheckedResults: new Set(),
   clearedSessions: new Set(),
+  scopeActions: new Map(),
   viewToken: 0,
   starting: false,
   speedInitialized: false,
@@ -314,6 +315,11 @@ function updateSelectionBadges() {
     const badge = row.querySelector('.date-selected');
     const count = dateCounts.get(row.dataset.date) || 0;
     if (badge) badge.textContent = count ? '已选 ' + count : '';
+    const button = row.querySelector('.mini');
+    if (button) {
+      button.textContent = scopeActionActive('date', row.dataset.date) ? '取消全选' : '全选';
+      button.classList.toggle('on', count > 0);
+    }
   });
   document.querySelectorAll('.month-group[data-month]').forEach(function (group) {
     const month = group.dataset.month;
@@ -321,9 +327,8 @@ function updateSelectionBadges() {
     const badge = group.querySelector('.month-selected');
     if (badge) badge.textContent = count ? '已选 ' + count : '';
     const button = group.querySelector('.month-head .mini');
-    const monthRow = state.months.find(function (row) { return row.month === month; });
-    if (button && monthRow) {
-      button.textContent = count >= monthRow.count && monthRow.count > 0 ? '取消本月' : '全选本月';
+    if (button) {
+      button.textContent = scopeActionActive('month', month) ? '取消全选' : '全选本月';
       button.classList.toggle('on', count > 0);
     }
   });
@@ -331,7 +336,28 @@ function updateSelectionBadges() {
     const badge = row.querySelector('.date-selected');
     const count = albumCounts.get(row.dataset.album) || 0;
     if (badge) badge.textContent = count ? '已选 ' + count : '';
+    const button = row.querySelector('.mini');
+    if (button) {
+      button.textContent = scopeActionActive('album', row.dataset.album) ? '取消全选' : '全选';
+      button.classList.toggle('on', count > 0);
+    }
   });
+}
+
+function updateScopeButton() {
+  if (!state.view || state.view.type === 'selected') return;
+  const labels = {
+    date: '全选本日',
+    month: '全选本月',
+    album: '全选本相册',
+    range: '全选范围',
+  };
+  const base = labels[state.view.type] || '全选当前';
+  const usable = scopeSelectable(state.currentPhotos);
+  const allSelected = usable.length > 0 && usable.every(function (photo) {
+    return state.selected.has(photo.mp4);
+  });
+  $('select-scope-btn').textContent = allSelected ? '取消全选' : base;
 }
 
 function updateSelectedHeader() {
@@ -563,17 +589,77 @@ function applyView() {
   if (state.minBytes > 0) {
     photos = photos.filter(function (photo) { return photo.size >= state.minBytes; });
   }
+  if (state.compressedFilter === 'uncompressed') {
+    photos = photos.filter(function (photo) { return !photo.compressed; });
+  } else if (state.compressedFilter === 'compressed') {
+    photos = photos.filter(function (photo) { return photo.compressed; });
+  }
   const grouped = state.viewGrouped && state.sortMode !== 'size';
   const hint = $('filter-hint');
-  if (state.minBytes > 0 || state.sortMode === 'size') {
+  if (state.minBytes > 0 || state.sortMode === 'size' || state.compressedFilter !== 'all') {
     const total = state.rawPhotos.reduce(function (sum, photo) { return sum + photo.size; }, 0);
     const shown = photos.reduce(function (sum, photo) { return sum + photo.size; }, 0);
-    hint.textContent = '显示 ' + photos.length + ' / ' + state.rawPhotos.length +
+    const status = state.compressedFilter === 'uncompressed'
+      ? '只看未压缩 · '
+      : (state.compressedFilter === 'compressed' ? '只看已压缩 · ' : '');
+    hint.textContent = status + '显示 ' + photos.length + ' / ' + state.rawPhotos.length +
       ' 张 · ' + formatBytes(shown) + ' / ' + formatBytes(total);
   } else {
     hint.textContent = '';
   }
   renderGrid(sortPhotos(photos), grouped);
+  updateScopeButton();
+}
+
+async function showRange(start, end) {
+  const load = startViewLoad();
+  let data;
+  try {
+    data = await api('/api/photos?start=' + encodeURIComponent(start) +
+      '&end=' + encodeURIComponent(end));
+  } catch (error) {
+    if (load.finish()) viewFailed(error);
+    return;
+  }
+  if (!load.finish()) return;
+  const photos = (data.photos || []).slice().sort(function (a, b) {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return a.time.localeCompare(b.time);
+  });
+  state.view = { type: 'range', start: start, end: end };
+  state.rawPhotos = photos;
+  state.viewGrouped = true;
+  $('view-title').textContent = start + ' ~ ' + end;
+  const totalBytes = photos.reduce(function (sum, photo) { return sum + photo.size; }, 0);
+  $('view-sub').textContent = photos.length + ' 张 · ' + formatBytes(totalBytes);
+  $('select-scope-btn').textContent = '全选范围';
+  $('select-scope-btn').classList.remove('hidden');
+  applyView();
+  renderSidebar();
+  $('content').scrollTop = 0;
+  const recompress = $('recompress-toggle').checked;
+  const usable = state.currentPhotos.filter(function (photo) {
+    return recompress || !photo.compressed;
+  });
+  const skipped = state.currentPhotos.length - usable.length;
+  state.selected.clear();
+  state.scopeActions.clear();
+  usable.forEach(function (photo) { state.selected.set(photo.mp4, photo); });
+  syncVisibleCards();
+  updateSelectionUI();
+  updateSelectionBadges();
+  refreshDividers();
+  $('range-hint').textContent = usable.length
+    ? '已选 ' + usable.length + ' 张' + (skipped ? ' · 跳过 ' + skipped + ' 张已压缩' : '')
+    : '范围内没有可压缩的照片';
+  if (!usable.length) {
+    toast(state.currentPhotos.length
+      ? '范围内都是已压缩照片；勾选「允许更深压缩」后再试'
+      : '这个日期范围内没有照片', true);
+  } else {
+    toast('已选中 ' + start + ' ~ ' + end + ' 的 ' + usable.length + ' 张照片' +
+      (skipped ? '；跳过 ' + skipped + ' 张已压缩' : ''));
+  }
 }
 
 function startViewLoad() {
@@ -1019,39 +1105,104 @@ function togglePhotos(photos, label) {
   return allSelected;
 }
 
-async function toggleDateSelection(date) {
+function scopeKey(type, value) {
+  return type + ':' + value;
+}
+
+function scopeActionActive(type, value) {
+  const key = scopeKey(type, value);
+  const action = state.scopeActions.get(key);
+  if (!action || !action.keys.length) return false;
+  const active = action.keys.every(function (mp4) {
+    return state.selected.has(mp4);
+  });
+  if (!active) state.scopeActions.delete(key);
+  return active;
+}
+
+function scopeSelectable(photos) {
+  const recompress = $('recompress-toggle').checked;
+  return photos.filter(function (photo) {
+    if (state.minBytes > 0 && photo.size < state.minBytes) return false;
+    if (state.compressedFilter === 'uncompressed' && photo.compressed) return false;
+    if (state.compressedFilter === 'compressed' && !photo.compressed) return false;
+    if (!recompress && photo.compressed) return false;
+    return true;
+  });
+}
+
+async function toggleScopeSelection(type, value, loadPhotos, label) {
+  const key = scopeKey(type, value);
+  const action = state.scopeActions.get(key);
+  if (action && action.keys.length && action.keys.every(function (mp4) {
+    return state.selected.has(mp4);
+  })) {
+    action.keys.forEach(function (mp4) { state.selected.delete(mp4); });
+    state.scopeActions.delete(key);
+    syncVisibleCards();
+    updateSelectionUI();
+    updateSelectionBadges();
+    if (state.view && state.view.type === 'selected') showSelected();
+    else refreshDividers();
+    toast('已取消 ' + label + ' 的 ' + action.keys.length + ' 个选择');
+    return;
+  }
+  let photos;
   try {
-    togglePhotos(await photosForDate(date), date);
+    photos = await loadPhotos();
   } catch (error) {
     toast(error.message, true);
+    return;
   }
+  const usable = scopeSelectable(photos);
+  if (!usable.length) {
+    toast('当前筛选下，' + label + '没有可选择的照片', true);
+    return;
+  }
+  usable.forEach(function (photo) { state.selected.set(photo.mp4, photo); });
+  state.scopeActions.set(key, {
+    keys: usable.map(function (photo) { return photo.mp4; }),
+  });
+  syncVisibleCards();
+  updateSelectionUI();
+  updateSelectionBadges();
+  if (state.view && state.view.type === 'selected') showSelected();
+  else refreshDividers();
+  const skipped = photos.length - usable.length;
+  toast('已选中 ' + label + ' 的 ' + usable.length + ' 张' +
+    (skipped ? '；跳过 ' + skipped + ' 张（已压缩或不符合筛选）' : ''));
+}
+
+async function toggleDateSelection(date) {
+  await toggleScopeSelection('date', date, function () {
+    return photosForDate(date);
+  }, date);
 }
 
 async function toggleMonthSelection(month) {
-  try {
-    togglePhotos(await photosForMonth(month), month);
-  } catch (error) {
-    toast(error.message, true);
-  }
+  await toggleScopeSelection('month', month, function () {
+    return photosForMonth(month);
+  }, month);
 }
 
 async function toggleAlbumSelection(album) {
-  try {
-    const segments = album.split('/').filter(Boolean);
-    togglePhotos(await photosForAlbum(album), segments[segments.length - 1] || album);
-  } catch (error) {
-    toast(error.message, true);
-  }
+  const segments = album.split('/').filter(Boolean);
+  await toggleScopeSelection('album', album, function () {
+    return photosForAlbum(album);
+  }, segments[segments.length - 1] || album);
 }
 
 function toggleDisplayedScope() {
   if (!state.view || state.view.type === 'selected') return;
   if (!state.currentPhotos.length) {
-    toast('当前筛选结果为空，先调整体积筛选', true);
+    toast('当前筛选结果为空，先调整筛选条件', true);
     return;
   }
   const labels = { date: state.view.date, month: state.view.month, album: state.view.album };
-  togglePhotos(state.currentPhotos.slice(), labels[state.view.type] || '当前范围');
+  const label = state.view.type === 'range'
+    ? state.view.start + ' ~ ' + state.view.end
+    : (labels[state.view.type] || '当前范围');
+  togglePhotos(state.currentPhotos.slice(), label);
 }
 
 async function selectLargest() {
@@ -1059,7 +1210,10 @@ async function selectLargest() {
     const data = await api('/api/largest?limit=50');
     const recompress = $('recompress-toggle').checked;
     const photos = (data.photos || []).filter(function (photo) {
-      return recompress || !photo.compressed;
+      if (!recompress && photo.compressed) return false;
+      if (state.compressedFilter === 'uncompressed' && photo.compressed) return false;
+      if (state.compressedFilter === 'compressed' && !photo.compressed) return false;
+      return true;
     });
     if (!photos.length) {
       toast('最大的 50 个都已压缩过；勾选「允许更深压缩」后再试', true);
@@ -1117,6 +1271,7 @@ function updateSelectionUI() {
     ? '已选 ' + photos.length + ' 个 · ' + formatBytes(bytes)
     : '未选择';
   $('selected-view-btn').textContent = '已选 ' + photos.length;
+  $('clear-selected-btn').disabled = photos.length === 0;
 
   const preset = $('preset').value;
   const ratio = EST_RATIO[preset] || 0.44;
@@ -1156,6 +1311,7 @@ function updateSelectionUI() {
     refreshNotice();
   }
   updateBusy();
+  updateScopeButton();
 }
 
 function refreshNotice() {
@@ -1760,118 +1916,6 @@ async function refreshAll() {
 
 /* ----------------------------------------------------------------- backups */
 
-function formatSessionName(name) {
-  const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(String(name));
-  if (!match) return name;
-  return match[1] + '-' + match[2] + '-' + match[3] + ' ' +
-    match[4] + ':' + match[5] + ':' + match[6];
-}
-
-async function openBackups() {
-  try {
-    const data = await api('/api/backups');
-    const sessions = data.sessions || [];
-    $('backup-sub').textContent = '原始 MP4 保存在这台电脑：' + data.backup_dir +
-      ' · 合计 ' + formatBytes(data.total_bytes);
-    $('backup-free').textContent = state.summary
-      ? '本机剩余空间 ' + formatBytes(state.summary.local_free) +
-        ' · 备份占用 ' + formatBytes(data.total_bytes)
-      : '';
-    const list = $('backup-list');
-    list.textContent = '';
-    if (!sessions.length) {
-      const empty = document.createElement('p');
-      empty.className = 'sub';
-      empty.textContent = '还没有备份。每次「应用到手机」前都会自动备份原 MP4。';
-      list.appendChild(empty);
-    }
-    sessions.forEach(function (session) {
-      const card = document.createElement('div');
-      card.className = 'backup-session';
-      const head = document.createElement('div');
-      head.className = 'backup-head';
-      const title = document.createElement('strong');
-      title.textContent = formatSessionName(session.session) + ' 的批次';
-      const meta = document.createElement('span');
-      meta.className = 'sub';
-      meta.textContent = session.count + ' 个 · ' + formatBytes(session.bytes) +
-        ' · restore.sh 可手动执行';
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'primary';
-      button.textContent = '恢复本批（' + session.count + '）';
-      button.addEventListener('click', function () {
-        restoreBackupSession(session);
-      });
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'ghost danger-btn';
-      remove.textContent = '删除本批';
-      remove.addEventListener('click', function () {
-        deleteBackupSession(session.session, session.count);
-      });
-      head.appendChild(title);
-      head.appendChild(meta);
-      head.appendChild(button);
-      head.appendChild(remove);
-      card.appendChild(head);
-
-      const entries = document.createElement('div');
-      entries.className = 'backup-entries hidden';
-      let rendered = false;
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'backup-details';
-      toggle.textContent = '展开文件列表（' + session.count + '）';
-
-      function renderEntries() {
-        if (rendered) return;
-        rendered = true;
-        const fragment = document.createDocumentFragment();
-        session.entries.slice(0, 200).forEach(function (entry) {
-          const row = document.createElement('div');
-          row.className = 'backup-entry';
-          const label = document.createElement('span');
-          label.textContent = (entry.date ? entry.date + ' ' + entry.time + ' · ' : '') +
-            basename(entry.mp4);
-          label.title = entry.mp4;
-          const size = document.createElement('span');
-          size.textContent = formatBytes(entry.original_size);
-          row.appendChild(label);
-          row.appendChild(size);
-          fragment.appendChild(row);
-        });
-        if (session.entries.length > 200) {
-          const more = document.createElement('div');
-          more.className = 'sub';
-          more.textContent = '…另有 ' + (session.entries.length - 200) + ' 个';
-          fragment.appendChild(more);
-        }
-        entries.appendChild(fragment);
-      }
-
-      function setEntriesOpen(open) {
-        if (open) renderEntries();
-        entries.classList.toggle('hidden', !open);
-        toggle.textContent = open
-          ? '收起文件列表'
-          : '展开文件列表（' + session.count + '）';
-      }
-
-      toggle.addEventListener('click', function () {
-        setEntriesOpen(entries.classList.contains('hidden'));
-      });
-      card.appendChild(toggle);
-      card.appendChild(entries);
-      if (session.count <= 3) setEntriesOpen(true);
-      list.appendChild(card);
-    });
-    $('backup-modal').classList.remove('hidden');
-  } catch (error) {
-    toast(error.message, true);
-  }
-}
-
 async function clearAppliedBackups(sessionName, count) {
   const ok = await confirmDialog('清除本批备份？', [
     '将永久删除这台电脑上的 ' + count + ' 个原始 MP4 备份，无法撤销。',
@@ -1883,7 +1927,11 @@ async function clearAppliedBackups(sessionName, count) {
   try {
     const data = await api('/api/delete-backups', {
       method: 'POST',
-      body: JSON.stringify({ session: sessionName, confirm: 'delete-backups' }),
+      body: JSON.stringify({
+        session: sessionName,
+        kind: 'live',
+        confirm: 'delete-backups',
+      }),
     });
     state.clearedSessions.add(sessionName);
     toast('已清除本批 ' + data.deleted_files + ' 个备份');
@@ -1892,84 +1940,6 @@ async function clearAppliedBackups(sessionName, count) {
     if (state.job) renderJobActions(state.job);
   } catch (error) {
     toast(error.message, true);
-  }
-}
-
-async function deleteBackupSession(sessionName, count) {
-  const ok = await confirmDialog('永久删除这批备份？', [
-    '将从电脑上删除 ' + count + ' 个原始 MP4 备份，无法撤销。',
-    '删除后，这些照片就再也无法恢复成原始动态片段（除非你另有备份）。',
-    '请先确认手机相册里的动态效果正常，再删除备份。',
-    '批次：' + sessionName,
-  ], '永久删除', true);
-  if (!ok) return;
-  try {
-    const data = await api('/api/delete-backups', {
-      method: 'POST',
-      body: JSON.stringify({ session: sessionName, confirm: 'delete-backups' }),
-    });
-    state.clearedSessions.add(sessionName);
-    toast('已删除 ' + data.deleted_files + ' 个备份文件');
-    await loadSummary();
-    await openBackups();
-    if (state.job) renderJobActions(state.job);
-  } catch (error) {
-    toast(error.message, true);
-  }
-}
-
-async function deleteAllBackups() {
-  try {
-    const data = await api('/api/backups');
-    const sessions = data.sessions || [];
-    if (!sessions.length) {
-      toast('当前没有备份');
-      return;
-    }
-    const files = sessions.reduce(function (sum, item) { return sum + item.count; }, 0);
-    const ok = await confirmDialog('永久删除全部备份？', [
-      '将删除 ' + sessions.length + ' 个批次、共 ' + files + ' 个原始 MP4 备份，无法撤销。',
-      '删除后无法再用 Studio 恢复任何原始动态片段。',
-      '如果手机上的压缩版还没有逐张确认，请不要删除。',
-    ], '永久删除全部', true);
-    if (!ok) return;
-    const result = await api('/api/delete-backups', {
-      method: 'POST',
-      body: JSON.stringify({ session: '*', confirm: 'delete-backups' }),
-    });
-    sessions.forEach(function (item) { state.clearedSessions.add(item.session); });
-    toast('已清除 ' + result.deleted_sessions + ' 个批次 / ' + result.deleted_files + ' 个文件');
-    await loadSummary();
-    await openBackups();
-    if (state.job) renderJobActions(state.job);
-  } catch (error) {
-    toast(error.message, true);
-  }
-}
-
-async function restoreBackupSession(session) {
-  if (state.starting || state.busy) return;
-  const ok = await confirmDialog('恢复这一批原始 MP4？', [
-    '将从电脑备份恢复 ' + session.count + ' 个 MP4（' + formatBytes(session.bytes) + '）。',
-    '只替换 MP4，JPG 不会改动；恢复后会重新扫描媒体库。',
-    '如果手机上的 MP4 已经被其他方式修改，会跳过该文件，避免覆盖新内容。',
-    '批次：' + formatSessionName(session.session) + ' · ' + session.session,
-  ], '确认恢复', true);
-  if (!ok) return;
-  state.starting = true;
-  updateBusy();
-  try {
-    const data = await api('/api/restore-backups', {
-      method: 'POST',
-      body: JSON.stringify({ session: session.session }),
-    });
-    $('backup-modal').classList.add('hidden');
-    showJob(data.job_id, 'restore-backup');
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    state.starting = false;
-    updateBusy();
   }
 }
 
@@ -2065,6 +2035,18 @@ function switchSideTab(tab) {
   renderSidebar();
 }
 
+function clearSelection() {
+  if (!state.selected.size) return;
+  const count = state.selected.size;
+  state.selected.clear();
+  state.scopeActions.clear();
+  syncVisibleCards();
+  updateSelectionUI();
+  renderSidebar();
+  if (state.view && state.view.type === 'selected') showSelected();
+  toast('已清空 ' + count + ' 个已选');
+}
+
 function bindEvents() {
   $('mode-btn').addEventListener('click', function () {
     window.location.href = '/?token=' + encodeURIComponent(TOKEN);
@@ -2072,13 +2054,7 @@ function bindEvents() {
   $('theme-btn').addEventListener('click', toggleTheme);
   $('compress-btn').addEventListener('click', compressSelected);
   $('selected-view-btn').addEventListener('click', showSelected);
-  $('clear-selection').addEventListener('click', function () {
-    state.selected.clear();
-    syncVisibleCards();
-    updateSelectionUI();
-    renderSidebar();
-    if (state.view && state.view.type === 'selected') showSelected();
-  });
+  $('clear-selected-btn').addEventListener('click', clearSelection);
   $('select-scope-btn').addEventListener('click', toggleDisplayedScope);
   $('preset').addEventListener('change', function () {
     $('crf-field').classList.toggle('hidden', $('preset').value !== 'custom');
@@ -2130,6 +2106,30 @@ function bindEvents() {
     state.minBytes = Number($('size-filter').value) || 0;
     applyView();
   });
+  $('compressed-filter').addEventListener('click', function (event) {
+    const button = event.target.closest('.filter-seg-btn');
+    if (!button) return;
+    state.compressedFilter = button.dataset.value;
+    this.querySelectorAll('.filter-seg-btn').forEach(function (item) {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    applyView();
+  });
+  $('range-select').addEventListener('click', function () {
+    const start = $('range-start').value;
+    const end = $('range-end').value;
+    if (!start || !end) {
+      toast('请先选择开始和结束日期', true);
+      return;
+    }
+    if (start > end) {
+      toast('开始日期不能晚于结束日期', true);
+      return;
+    }
+    showRange(start, end);
+  });
   $('sort-select').addEventListener('change', function () {
     state.sortMode = $('sort-select').value;
     applyView();
@@ -2149,21 +2149,10 @@ function bindEvents() {
     const collapsed = $('job-panel').classList.toggle('collapsed');
     this.textContent = collapsed ? '展开详情' : '收起详情';
   });
-  $('backup-btn').addEventListener('click', openBackups);
-  $('backup-clear-all').addEventListener('click', deleteAllBackups);
-  $('backup-close').addEventListener('click', function () {
-    $('backup-modal').classList.add('hidden');
-  });
-  $('backup-modal').addEventListener('click', function (event) {
-    if (event.target === $('backup-modal')) $('backup-modal').classList.add('hidden');
-  });
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
     if (!$('modal').classList.contains('hidden')) closeModal(false);
     else if (!$('preview').classList.contains('hidden')) closePreview();
-    else if (!$('backup-modal').classList.contains('hidden')) {
-      $('backup-modal').classList.add('hidden');
-    }
   });
 }
 

@@ -24,6 +24,7 @@ const state = {
   view: { type: 'all' },
   preset: 'balanced',
   minBytes: 0,
+  compressedFilter: 'all',
   sortMode: 'time',
   job: null,
   compressJob: null,
@@ -209,6 +210,7 @@ async function loadSummary() {
   $('video-count').textContent = (data.count || 0).toLocaleString('zh-CN');
   $('video-size').textContent = formatBytes(data.bytes);
   $('video-compressed').textContent = (data.compressed_count || 0).toLocaleString('zh-CN');
+  $('backup-size').textContent = formatBytes(data.backup_bytes || 0);
   $('all-count').textContent = (data.count || 0) + ' 个';
   $('video-side-summary').textContent = formatBytes(data.bytes);
   updateSelectionUI();
@@ -227,6 +229,9 @@ async function loadVideos() {
     query = '?month=' + encodeURIComponent(state.view.month);
   } else if (state.view.type === 'album') {
     query = '?album=' + encodeURIComponent(state.view.album);
+  } else if (state.view.type === 'range') {
+    query = '?start=' + encodeURIComponent(state.view.start) +
+      '&end=' + encodeURIComponent(state.view.end);
   }
   const data = await api('/api/video/list' + query);
   state.videos = data.videos || [];
@@ -235,7 +240,12 @@ async function loadVideos() {
 
 function applyFilter() {
   const minBytes = state.minBytes;
-  let videos = state.videos.filter(function (video) { return video.size >= minBytes; });
+  let videos = state.videos.filter(function (video) {
+    if (video.size < minBytes) return false;
+    if (state.compressedFilter === 'uncompressed' && video.compressed) return false;
+    if (state.compressedFilter === 'compressed' && !video.compressed) return false;
+    return true;
+  });
   if (state.sortMode === 'size') {
     videos = videos.slice().sort(function (a, b) { return b.size - a.size; });
   } else {
@@ -253,11 +263,15 @@ function renderView() {
   let title = '全部视频';
   if (state.view.type === 'month') title = state.view.month;
   else if (state.view.type === 'album') title = state.view.name || state.view.album;
+  else if (state.view.type === 'range') title = state.view.start + ' ~ ' + state.view.end;
+  const status = state.compressedFilter === 'uncompressed'
+    ? '只看未压缩 · '
+    : (state.compressedFilter === 'compressed' ? '只看已压缩 · ' : '');
   $('view-title').textContent = title;
   $('view-sub').textContent =
-    state.filtered.length + ' 个 · ' + formatBytes(totalBytes) +
+    status + state.filtered.length + ' 个 · ' + formatBytes(totalBytes) +
     ' · 建议每批 ≤ ' + formatBytes(state.summary ? state.summary.suggested_batch_bytes : 0);
-  $('filter-hint').textContent = state.filtered.length + ' 个视频';
+  $('filter-hint').textContent = status + state.filtered.length + ' 个视频';
   $('video-grid').textContent = '';
   state.renderedCount = 0;
   const empty = $('video-empty');
@@ -410,7 +424,13 @@ function updateSelectionUI() {
   $('selected-count').textContent = count;
   $('selected-size').textContent = formatBytes(bytes);
   $('selected-view-btn').textContent = '已选 ' + count;
+  $('clear-selected-btn').disabled = count === 0;
   $('compress-btn').disabled = count === 0 || state.busy;
+  const available = state.filtered.filter(function (video) { return !video.compressed; });
+  const allSelected = available.length > 0 && available.every(function (video) {
+    return state.selected.has(video.path);
+  });
+  $('select-scope-btn').textContent = allSelected ? '取消全选' : '全选当前';
   const suggestion = state.summary ? state.summary.suggested_batch_bytes : 0;
   const hint = $('batch-hint');
   if (!count) {
@@ -431,8 +451,23 @@ function selectedPaths() {
   return Array.from(state.selected.keys());
 }
 
+function clearSelection() {
+  if (!state.selected.size) return;
+  const count = state.selected.size;
+  state.selected.clear();
+  syncVisibleCards();
+  updateSelectionUI();
+  toast('已清空 ' + count + ' 个已选');
+}
+
 function toggleCurrentScope() {
   const available = state.filtered.filter(function (video) { return !video.compressed; });
+  if (!available.length) {
+    toast(state.compressedFilter === 'compressed'
+      ? '当前只看已压缩视频，不能重复压缩'
+      : '当前筛选结果为空', true);
+    return;
+  }
   const allSelected = available.length > 0 && available.every(function (video) {
     return state.selected.has(video.path);
   });
@@ -457,6 +492,7 @@ function selectLargest() {
 function videoJobTitle(kind) {
   if (kind === 'video-apply') return '应用视频';
   if (kind === 'video-restore') return '恢复视频';
+  if (kind === 'restore-backup') return '从电脑备份恢复';
   return '视频压缩';
 }
 
@@ -673,12 +709,49 @@ async function afterJob(job) {
     state.compressJob = job;
     return;
   }
-  if (job.kind === 'video-apply' || job.kind === 'video-restore') {
+  if (job.kind === 'video-apply' || job.kind === 'video-restore' ||
+      job.kind === 'restore-backup') {
     state.selected.clear();
     await loadSummary();
     await loadSidebar();
     await loadVideos();
     if (job.kind === 'video-restore') state.compressJob = null;
+  }
+}
+
+async function selectDateRange() {
+  const start = $('range-start').value;
+  const end = $('range-end').value;
+  if (!start || !end) {
+    toast('请先选择开始和结束日期', true);
+    return;
+  }
+  if (start > end) {
+    toast('开始日期不能晚于结束日期', true);
+    return;
+  }
+  state.view = { type: 'range', start: start, end: end };
+  syncSidebarActive();
+  try {
+    await loadVideos();
+  } catch (error) {
+    toast(error.message, true);
+    return;
+  }
+  const usable = state.filtered.filter(function (video) { return !video.compressed; });
+  state.selected.clear();
+  usable.forEach(function (video) { state.selected.set(video.path, video); });
+  syncVisibleCards();
+  updateSelectionUI();
+  $('range-hint').textContent = usable.length
+    ? '已选 ' + usable.length + ' 个未压缩视频'
+    : '范围内没有可压缩视频';
+  if (!usable.length) {
+    toast(state.compressedFilter === 'compressed'
+      ? '范围内都是已压缩视频，不能重复压缩'
+      : '这个日期范围内没有可压缩视频', true);
+  } else {
+    toast('已选中 ' + start + ' ~ ' + end + ' 的 ' + usable.length + ' 个视频');
   }
 }
 
@@ -797,11 +870,24 @@ function bindEvents() {
   });
   $('select-scope-btn').addEventListener('click', toggleCurrentScope);
   $('largest-btn').addEventListener('click', selectLargest);
+  $('clear-selected-btn').addEventListener('click', clearSelection);
   $('load-more').addEventListener('click', appendNextPage);
   $('size-filter').addEventListener('change', function () {
     state.minBytes = Number(this.value) || 0;
     renderView();
   });
+  $('compressed-filter').addEventListener('click', function (event) {
+    const button = event.target.closest('.filter-seg-btn');
+    if (!button) return;
+    state.compressedFilter = button.dataset.value;
+    this.querySelectorAll('.filter-seg-btn').forEach(function (item) {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderView();
+  });
+  $('range-select').addEventListener('click', selectDateRange);
   $('sort-select').addEventListener('change', function () {
     state.sortMode = this.value;
     renderView();
