@@ -23,10 +23,14 @@ from adbclean.studio import (
     _backup_verified,
     _compress_job,
     _delete_backup_session,
+    _history_entry,
+    _history_skip_reason,
     _job_file,
+    _load_history,
     _migrate_legacy_backups,
     _photo_payload,
     _read_backup_session,
+    _save_history,
     _string_list,
     _write_restore_script,
     estimate_local_need,
@@ -101,14 +105,46 @@ def test_photo_payload_contains_album():
     assert payload["unknown_duration"] is False
 
 
+def test_history_entry_and_payload():
+    pair = make_pair("/sdcard/DCIM/Camera/IMG_20260102_030405.mp4", size=50)
+    state = make_state([pair])
+    state.history[pair.mp4] = {"compressed_size": 50, "crf_used": 23}
+    assert _history_entry(state, pair)["crf_used"] == 23
+    payload = _photo_payload(pair, state)
+    assert payload["compressed"] is True
+    assert payload["history_crf"] == 23
+    pair.size = 51
+    assert _history_entry(state, pair) is None
+    assert _photo_payload(pair, state)["compressed"] is False
+
+
+def test_history_skip_reason():
+    entry = {"compressed_size": 50, "crf_used": 20}
+    assert _history_skip_reason(None, False, PRESETS["balanced"]) == ""
+    assert "已压缩过" in _history_skip_reason(entry, False, PRESETS["balanced"])
+    assert "不是更深压缩" in _history_skip_reason(
+        entry, True, PRESETS["visually_lossless"]
+    )
+    assert _history_skip_reason(entry, True, PRESETS["small"]) == ""
+    assert "无损重封装" in _history_skip_reason(entry, True, PRESETS["lossless"])
+
+
+def test_history_roundtrip(tmp_path, monkeypatch):
+    import adbclean.studio as studio
+
+    monkeypatch.setattr(studio, "HISTORY_PATH", tmp_path / "history.json")
+    _save_history({"/sdcard/a.mp4": {"compressed_size": 1}})
+    assert _load_history() == {"/sdcard/a.mp4": {"compressed_size": 1}}
+
+
 def test_string_list_dedupes_and_validates():
     assert _string_list({"paths": ["b", "a", "b"]}) == ["b", "a"]
     with pytest.raises(BadRequest):
         _string_list({"paths": "a"})
     with pytest.raises(BadRequest):
         _string_list({"paths": [1, 2]})
-    with pytest.raises(BadRequest):
-        _string_list({"paths": ["p{}".format(i) for i in range(501)]})
+    large = ["p{}".format(i) for i in range(1200)]
+    assert len(_string_list({"paths": large})) == 1200
 
 
 def test_backup_file_rejects_traversal(tmp_path):
@@ -451,6 +487,21 @@ def test_item_result_defaults():
     item = ItemResult("/sdcard/a.mp4", "/sdcard/a.jpg", "2026-01-02", "03:04:05")
     assert item.status == "pending"
     assert item.original_md5 == ""
+
+
+def test_compress_job_skips_preskipped_items(tmp_path, monkeypatch):
+    import adbclean.studio as studio
+
+    monkeypatch.setattr(studio, "JOBS_DIR", tmp_path / "jobs")
+    state = make_state()
+    job = Job(id="skip1", kind="compress", total=1)
+    item = ItemResult("/sdcard/a.mp4", "/sdcard/a.jpg", "2026-01-02", "03:04:05")
+    item.status = "skipped"
+    item.reason = "已压缩过"
+    job.items = [item]
+    _compress_job(state, job, PRESETS["balanced"], "hardware", False)
+    assert job.done == 1
+    assert item.status == "skipped"
 
 
 def test_compress_job_cancelled_skips_items(tmp_path, monkeypatch):

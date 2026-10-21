@@ -69,7 +69,7 @@
 
 Windows 说明：
 
-- 核心代码只用 Python 标准库、ADB 和 ffmpeg，路径处理已兼容 Windows；备份在 `%APPDATA%\adbclean\studio\backups`。
+- 核心代码只用 Python 标准库、ADB 和 ffmpeg，路径处理已兼容 Windows；备份在 `%APPDATA%\adbclean\studio\backups`，压缩历史在 `%APPDATA%\adbclean\studio\history.json`。
 - 没有 VideoToolbox，默认使用软件 veryfast；网页恢复功能正常，`restore.sh` 需要 Git Bash/WSL。
 - Windows 未做真机回归测试；遇到 ADB/驱动问题先确认 `adb devices` 能看到设备。
 

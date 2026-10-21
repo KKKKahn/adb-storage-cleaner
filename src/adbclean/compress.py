@@ -226,6 +226,7 @@ class CompressResult:
     audio_reencoded: bool = False
     speed_used: str = "slow"
     hardware_quality_used: Optional[int] = None
+    crf_used: Optional[int] = None
     fallback_note: str = ""
 
 
@@ -694,6 +695,7 @@ def compress_file(
     best_size: Optional[int] = None
     best_speed = speed
     best_q: Optional[int] = None
+    best_crf: Optional[int] = None
     best_audio = False
     best_label = ""
     hardware_failed = False
@@ -719,8 +721,15 @@ def compress_file(
         verify_decodable(temp_path, ffmpeg, timeout)
         return os.path.getsize(temp_path), audio
 
-    def record(size: int, audio: bool, attempt_speed: str, attempt_q: Optional[int], label: str):
-        nonlocal best_size, best_speed, best_q, best_audio, best_label
+    def record(
+        size: int,
+        audio: bool,
+        attempt_speed: str,
+        attempt_q: Optional[int],
+        label: str,
+        crf: Optional[int],
+    ):
+        nonlocal best_size, best_speed, best_q, best_crf, best_audio, best_label
         if preset.mode != "copy" and not is_profitable(original_size, size):
             return False
         if best_size is None or size < best_size:
@@ -728,6 +737,7 @@ def compress_file(
             best_size = size
             best_speed = attempt_speed
             best_q = attempt_q
+            best_crf = crf
             best_audio = audio
             best_label = label
         return True
@@ -740,10 +750,10 @@ def compress_file(
     try:
         if preset.mode == "copy":
             size, audio = run_attempt(speed, None, preset)
-            record(size, audio, speed, None, "无损重封装")
+            record(size, audio, speed, None, "无损重封装", None)
         elif speed != "hardware":
             size, audio = run_attempt(speed, None, preset)
-            record(size, audio, speed, None, f"软件 {speed}")
+            record(size, audio, speed, None, f"软件 {speed}", preset.crf)
         else:
             hardware_ok = False
             hardware_size = 0
@@ -756,6 +766,7 @@ def compress_file(
                     "hardware",
                     hardware_quality(preset.crf),
                     "硬件加速",
+                    preset.crf,
                 )
             except HardwareEncoderError:
                 hardware_failed = True
@@ -770,11 +781,25 @@ def compress_file(
             if need_software:
                 software_size, software_audio = run_attempt("veryfast", None, preset)
                 software_savings = savings_pct(software_size)
-                record(software_size, software_audio, "veryfast", None, f"软件 CRF{preset.crf}")
+                record(
+                    software_size,
+                    software_audio,
+                    "veryfast",
+                    None,
+                    f"软件 CRF{preset.crf}",
+                    preset.crf,
+                )
                 if preset.key == "balanced" and software_savings < MIN_HARDWARE_SAVINGS:
                     small_preset = PRESETS["small"]
                     small_size, small_audio = run_attempt("veryfast", None, small_preset)
-                    record(small_size, small_audio, "veryfast", None, "软件 CRF23")
+                    record(
+                        small_size,
+                        small_audio,
+                        "veryfast",
+                        None,
+                        "软件 CRF23",
+                        small_preset.crf,
+                    )
 
         if best_size is None:
             raise NoBenefit(
@@ -818,6 +843,7 @@ def compress_file(
         audio_reencoded=best_audio,
         speed_used=best_speed,
         hardware_quality_used=best_q,
+        crf_used=best_crf,
         fallback_note="；".join(fallback_notes),
     )
 

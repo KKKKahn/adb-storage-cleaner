@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="adbclean-token" content="__ADBCLEAN_TOKEN__">
 <title>adbclean Studio · 实况照片压缩</title>
-<link rel="stylesheet" href="/static/style.css?v=0.2.4">
+<link rel="stylesheet" href="/static/style.css?v=0.2.5">
 </head>
 <body>
 <header class="topbar">
@@ -143,6 +143,10 @@
       <input id="ssim-toggle" type="checkbox">
       <span>计算 SSIM（慢）</span>
     </label>
+    <label class="check-field" title="已压缩照片只有选择更高 CRF / 更小体积档位时才会再次处理">
+      <input id="recompress-toggle" type="checkbox">
+      <span>允许更深压缩</span>
+    </label>
     <button id="compress-btn" class="primary" type="button" disabled>压缩所选</button>
   </div>
 </div>
@@ -186,6 +190,6 @@
 
 <div id="toast" class="toast hidden" role="status"></div>
 
-<script src="/static/app.js?v=0.2.4"></script>
+<script src="/static/app.js?v=0.2.5"></script>
 </body>
 </html>

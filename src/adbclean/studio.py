@@ -47,16 +47,17 @@ from .compress import (
 )
 from .live import LivePair, find_pairs, load_durations, sh_quote
 from .scan import Scan, load_latest, save_scan, scan_device
-from .util import data_dir, human, mask_serial, now_iso, stamp, state_dir
+from .util import data_dir, human, mask_serial, now_iso, read_json, stamp, state_dir, write_json
 
 WEB_DIR = Path(__file__).resolve().with_name("web")
 STUDIO_DIR = state_dir() / "studio"
 JOBS_DIR = STUDIO_DIR / "jobs"
 THUMBS_DIR = STUDIO_DIR / "thumbs"
 BACKUPS_DIR = data_dir() / "studio" / "backups"
+HISTORY_PATH = data_dir() / "studio" / "history.json"
 LEGACY_BACKUPS_DIR = STUDIO_DIR / "backups"
 MAX_BODY = 1024 * 1024
-MAX_JOB_ITEMS = 500
+BATCH_SUGGESTION = 200
 ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 THUMB_WIDTH = 480
 
@@ -88,6 +89,8 @@ class ItemResult:
     mtime: int = 0
     duration_ms: Optional[int] = None
     elapsed_ms: int = 0
+    crf_used: Optional[int] = None
+    speed_used: str = ""
 
 
 @dataclass
@@ -124,6 +127,7 @@ class StudioState:
     model: str = ""
     android: str = ""
     jobs: Dict[str, Job] = field(default_factory=dict)
+    history: Dict[str, Dict] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock)
     adb_lock: threading.Lock = field(default_factory=threading.Lock)
     thumb_sem: threading.BoundedSemaphore = field(
@@ -321,6 +325,45 @@ def _date_time_from_path(path: str) -> Tuple[str, str]:
         return "", ""
     day, clock = match.group(1), match.group(2)
     return f"{day[:4]}-{day[4:6]}-{day[6:8]}", f"{clock[:2]}:{clock[2:4]}:{clock[4:6]}"
+
+
+def _load_history() -> Dict[str, Dict]:
+    payload = read_json(HISTORY_PATH, {})
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(path): entry
+        for path, entry in payload.items()
+        if isinstance(entry, dict) and path.startswith("/sdcard/")
+    }
+
+
+def _save_history(history: Dict[str, Dict]) -> None:
+    write_json(HISTORY_PATH, history)
+
+
+def _history_entry(state: StudioState, pair: LivePair) -> Optional[Dict]:
+    entry = state.history.get(pair.mp4)
+    if not entry:
+        return None
+    if int(entry.get("compressed_size", -1)) != pair.size:
+        return None
+    return entry
+
+
+def _history_skip_reason(entry: Optional[Dict], recompress: bool, preset) -> str:
+    if not entry:
+        return ""
+    old_crf = entry.get("crf_used")
+    old_label = f"CRF{old_crf}" if old_crf is not None else "无损重封装"
+    if preset.mode == "copy":
+        return f"已压缩过（{old_label}）；无损重封装不会进一步减小体积"
+    if not recompress:
+        return f"已压缩过（{old_label}）；勾选“允许更深压缩”后再处理"
+    new_crf = preset.crf
+    if old_crf is not None and (new_crf is None or int(new_crf) <= int(old_crf)):
+        return f"已压缩过（{old_label}），当前档位不是更深压缩"
+    return ""
 
 
 def _read_backup_session(session: Path) -> Optional[Dict]:
@@ -638,6 +681,9 @@ def _compress_one(
             job.done += 1
         return
     with state.lock:
+        if item.status == "skipped":
+            job.done += 1
+            return
         item.status = "running"
     try:
         pair = state.pairs_by_mp4.get(item.mp4)
@@ -695,6 +741,8 @@ def _compress_one(
             item.source = local_src.relative_to(directory).as_posix()
             item.mtime = remote_mtime
             item.duration_ms = pair.duration_ms
+            item.crf_used = result.crf_used
+            item.speed_used = result.speed_used
             item.status = "ready"
             reasons = []
             if result.fallback_note:
@@ -867,6 +915,17 @@ def _apply_one(
             restore_rows.append(
                 (target.relative_to(backup_dir).as_posix(), pair.mp4, mtime)
             )
+            if src.crf_used is not None:
+                state.history[item.mp4] = {
+                    "original_md5": src.original_md5,
+                    "compressed_md5": src.compressed_md5,
+                    "original_size": src.original_size,
+                    "compressed_size": src.compressed_size,
+                    "crf_used": src.crf_used,
+                    "speed_used": src.speed_used,
+                    "applied_at": now_iso(),
+                    "backup": item.backup,
+                }
     except (CompressError, ADBError, OSError, ValueError) as exc:
         with state.lock:
             item.status = "error"
@@ -908,6 +967,9 @@ def _apply_job(state: StudioState, job: Job, source_job: Job) -> None:
         _write_backup_manifest(backup_dir, manifest_rows)
         _write_restore_script(backup_dir, restore_rows)
         save_scan(state.scan)
+        with state.lock:
+            history_snapshot = dict(state.history)
+        _save_history(history_snapshot)
         job.message = f"已应用 {len(manifest_rows)} 个；备份目录 {backup_dir}"
     else:
         with contextlib.suppress(OSError):
@@ -938,6 +1000,7 @@ def _restore_job(state: StudioState, job: Job, source_job: Job) -> None:
                 item.mtime = mtime
                 item.status = "restored"
                 src.status = "restored"
+                state.history.pop(pair.mp4, None)
         except (CompressError, ADBError, OSError, ValueError) as exc:
             with state.lock:
                 item.status = "error"
@@ -950,6 +1013,9 @@ def _restore_job(state: StudioState, job: Job, source_job: Job) -> None:
             with state.lock:
                 job.done += 1
     save_scan(state.scan)
+    with state.lock:
+        history_snapshot = dict(state.history)
+    _save_history(history_snapshot)
 
 
 def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None:
@@ -1013,6 +1079,7 @@ def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None
                 item.mtime = entry["mtime"]
                 item.backup = entry["backup"]
                 item.status = "restored"
+                state.history.pop(item.mp4, None)
                 if pair is not None:
                     state.update_scan_size(item.mp4, entry["original_size"])
                     pair.size = entry["original_size"]
@@ -1028,6 +1095,9 @@ def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None
             with state.lock:
                 job.done += 1
     save_scan(state.scan)
+    with state.lock:
+        history_snapshot = dict(state.history)
+    _save_history(history_snapshot)
     job.message = f"已从备份恢复 {restored} 个"
 
 
@@ -1091,6 +1161,8 @@ def _item_payload(item: ItemResult) -> Dict:
         "mtime": item.mtime,
         "duration_ms": item.duration_ms,
         "elapsed_ms": item.elapsed_ms,
+        "crf_used": item.crf_used,
+        "speed_used": item.speed_used,
     }
 
 
@@ -1110,7 +1182,8 @@ def _job_payload(job: Job) -> Dict:
     }
 
 
-def _photo_payload(pair: LivePair) -> Dict:
+def _photo_payload(pair: LivePair, state: Optional[StudioState] = None) -> Dict:
+    entry = _history_entry(state, pair) if state is not None else None
     return {
         "mp4": pair.mp4,
         "jpg": pair.jpg,
@@ -1120,6 +1193,9 @@ def _photo_payload(pair: LivePair) -> Dict:
         "duration_ms": pair.duration_ms,
         "unknown_duration": pair.duration_ms is None,
         "album": _album_of(pair.mp4),
+        "compressed": bool(entry),
+        "history_crf": entry.get("crf_used") if entry else None,
+        "history_size": entry.get("compressed_size") if entry else None,
     }
 
 
@@ -1173,8 +1249,6 @@ def _string_list(payload: Dict, key: str = "paths") -> List[str]:
     value = payload.get(key, [])
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise BadRequest(f"{key} 必须是字符串数组")
-    if len(value) > MAX_JOB_ITEMS:
-        raise BadRequest(f"一次最多处理 {MAX_JOB_ITEMS} 个文件")
     seen = set()
     result = []
     for item in value:
@@ -1396,7 +1470,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                     raise BadRequest("month 格式必须是 YYYY-MM")
                 with self.state.lock:
                     pairs = self.state.pairs_for_month(month)
-                photos = [_photo_payload(pair) for pair in pairs]
+                photos = [_photo_payload(pair, self.state) for pair in pairs]
                 self._send_json({"month": month, "photos": photos})
                 return
             if album:
@@ -1405,24 +1479,28 @@ class StudioHandler(BaseHTTPRequestHandler):
                     if album not in known:
                         raise BadRequest("未知相册")
                     pairs = self.state.pairs_for_album(album)
-                photos = [_photo_payload(pair) for pair in pairs]
+                photos = [_photo_payload(pair, self.state) for pair in pairs]
                 self._send_json({"album": album, "photos": photos})
                 return
             if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
                 raise BadRequest("date 格式必须是 YYYY-MM-DD")
             with self.state.lock:
                 pairs = self.state.pairs_for(date)
-            self._send_json({"date": date, "photos": [_photo_payload(pair) for pair in pairs]})
+            self._send_json(
+                {"date": date, "photos": [_photo_payload(pair, self.state) for pair in pairs]}
+            )
             return
         if path == "/api/largest":
             try:
                 limit = int((query.get("limit") or ["50"])[0])
             except ValueError as exc:
                 raise BadRequest("limit 必须是整数") from exc
-            limit = max(1, min(limit, MAX_JOB_ITEMS))
+            limit = max(1, limit)
             with self.state.lock:
                 pairs = sorted(self.state.pairs, key=lambda pair: -pair.size)[:limit]
-            self._send_json({"photos": [_photo_payload(pair) for pair in pairs]})
+            self._send_json(
+                {"photos": [_photo_payload(pair, self.state) for pair in pairs]}
+            )
             return
         if path == "/api/thumb":
             remote = (query.get("path") or [""])[0]
@@ -1528,6 +1606,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             "default_speed": "hardware" if self.state.hardware_encoder else "veryfast",
             "workers": self.state.workers,
             "apply_workers": self.state.apply_workers,
+            "history_count": len(self.state.history),
+            "batch_suggestion": BATCH_SUGGESTION,
             "crf_range": [UI_CRF_MIN, UI_CRF_MAX],
             "backup_bytes": backup_bytes,
             "backup_dir": str(BACKUPS_DIR),
@@ -1612,20 +1692,34 @@ class StudioHandler(BaseHTTPRequestHandler):
         if speed == "hardware" and not state.hardware_encoder:
             raise BadRequest("当前 ffmpeg 不支持 Apple 硬件编码，请选择快/均衡/最小体积")
         compute_ssim = bool(payload.get("compute_ssim", False))
+        recompress = bool(payload.get("recompress", False))
         items = []
         total_bytes = 0
         for remote in paths:
             pair = state.pairs_by_mp4.get(remote)
             if pair is None:
                 raise BadRequest(f"不在实况照片配对清单中: {remote}")
-            total_bytes += pair.size
-            items.append(ItemResult(remote, pair.jpg, pair.date, pair.time))
+            item = ItemResult(remote, pair.jpg, pair.date, pair.time)
+            skip_reason = _history_skip_reason(
+                _history_entry(state, pair), recompress, preset
+            )
+            if skip_reason:
+                item.status = "skipped"
+                item.reason = skip_reason
+            else:
+                total_bytes += pair.size
+            items.append(item)
+        if not any(item.status != "skipped" for item in items):
+            raise BadRequest(
+                "所选照片都已压缩过；勾选“允许更深压缩”，或选择小体积/更高 CRF 档位"
+            )
         free = shutil.disk_usage(str(state_dir())).free
         needed = estimate_local_need(total_bytes)
+        warning = ""
         if needed > free:
-            raise BadRequest(
+            warning = (
                 f"本机空间不足：本批约需 {human(needed)}，当前可用 {human(free)}。"
-                "请减少选择数量，或先清理本机任务缓存。"
+                f"会先处理能容纳的文件，剩余标记为空间不足；建议每批约 {BATCH_SUGGESTION} 个。"
             )
         job = state.new_job(
             "compress",
@@ -1637,7 +1731,10 @@ class StudioHandler(BaseHTTPRequestHandler):
             job,
             lambda: _compress_job(state, job, preset, speed, compute_ssim),
         )
-        self._send_json({"job_id": job.id}, 202)
+        self._send_json(
+            {"job_id": job.id, "warning": warning, "suggested_batch": BATCH_SUGGESTION},
+            202,
+        )
 
     def _post_apply(self, payload: Dict) -> None:
         state = self.state
@@ -1842,6 +1939,7 @@ def serve(args) -> int:
         workers=max(1, min(int(getattr(args, "workers", 3)), 8)),
         apply_workers=max(1, min(int(getattr(args, "apply_workers", 4)), 4)),
         hardware_encoder=hardware_encoder,
+        history=_load_history(),
         model=model,
         android=android,
     )

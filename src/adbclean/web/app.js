@@ -2,7 +2,7 @@
 
 const TOKEN = document.querySelector('meta[name="adbclean-token"]').content;
 const PAGE_SIZE = 200;
-const MAX_JOB_ITEMS = 500;
+const BATCH_SUGGESTION = 200;
 const EST_RATIO = {
   visually_lossless: 0.575,
   balanced: 0.44,
@@ -47,7 +47,6 @@ const state = {
   speedInitialized: false,
   busy: false,
   ffmpegOk: true,
-  spaceOk: true,
   notice: null,
 };
 
@@ -756,6 +755,16 @@ function makeCard(photo) {
   card.dataset.mp4 = photo.mp4;
   if (state.selected.has(photo.mp4)) card.classList.add('selected');
 
+  if (photo.compressed) {
+    card.classList.add('is-compressed');
+    const badge = document.createElement('span');
+    badge.className = 'compressed-badge';
+    badge.textContent = '已压缩';
+    badge.title = '已压缩' + (photo.history_crf ? '（CRF' + photo.history_crf + '）' : '') +
+      (photo.history_size ? ' · ' + formatBytes(photo.history_size) : '');
+    card.appendChild(badge);
+  }
+
   const checkWrap = document.createElement('label');
   checkWrap.className = 'card-check';
   checkWrap.title = '选择这张照片';
@@ -829,6 +838,16 @@ function makeCard(photo) {
 /* --------------------------------------------------------------- selection */
 
 function togglePhoto(photo, checked) {
+  if (checked && photo.compressed && !$('recompress-toggle').checked) {
+    toast('这张已压缩过；勾选「允许更深压缩」后再选', true);
+    document.querySelectorAll('.card').forEach(function (card) {
+      if (card.dataset.mp4 !== photo.mp4) return;
+      card.classList.remove('selected');
+      const input = card.querySelector('input');
+      if (input) input.checked = false;
+    });
+    return;
+  }
   if (checked) {
     state.selected.set(photo.mp4, photo);
   } else {
@@ -882,10 +901,19 @@ function togglePhotos(photos, label) {
     toast('没有可选择的照片', true);
     return false;
   }
-  const allSelected = photos.every(function (photo) {
+  const recompress = $('recompress-toggle').checked;
+  const usable = photos.filter(function (photo) {
+    return recompress || !photo.compressed;
+  });
+  const skipped = photos.length - usable.length;
+  if (!usable.length) {
+    toast('这些照片都已压缩过；勾选「允许更深压缩」后再选', true);
+    return false;
+  }
+  const allSelected = usable.every(function (photo) {
     return state.selected.has(photo.mp4);
   });
-  photos.forEach(function (photo) {
+  usable.forEach(function (photo) {
     if (allSelected) state.selected.delete(photo.mp4);
     else state.selected.set(photo.mp4, photo);
   });
@@ -894,9 +922,10 @@ function togglePhotos(photos, label) {
   updateSelectionBadges();
   if (state.view && state.view.type === 'selected') showSelected();
   else refreshDividers();
-  toast(allSelected
-    ? '已取消 ' + label + ' 的 ' + photos.length + ' 张'
-    : '已选中 ' + label + ' 的 ' + photos.length + ' 张');
+  toast((allSelected
+    ? '已取消 ' + label + ' 的 ' + usable.length + ' 张'
+    : '已选中 ' + label + ' 的 ' + usable.length + ' 张') +
+    (skipped ? '；跳过 ' + skipped + ' 张已压缩照片' : ''));
   return allSelected;
 }
 
@@ -938,7 +967,14 @@ function toggleDisplayedScope() {
 async function selectLargest() {
   try {
     const data = await api('/api/largest?limit=50');
-    const photos = data.photos || [];
+    const recompress = $('recompress-toggle').checked;
+    const photos = (data.photos || []).filter(function (photo) {
+      return recompress || !photo.compressed;
+    });
+    if (!photos.length) {
+      toast('最大的 50 个都已压缩过；勾选「允许更深压缩」后再试', true);
+      return;
+    }
     photos.forEach(function (photo) { state.selected.set(photo.mp4, photo); });
     updateSelectionUI();
     syncVisibleCards();
@@ -996,7 +1032,6 @@ function updateSelectionUI() {
   const ratio = EST_RATIO[preset] || 0.44;
   const localFree = state.summary ? Number(state.summary.local_free) || 0 : 0;
   const needed = Math.round(bytes * 1.5) + 256 * 1024 * 1024;
-  state.spaceOk = !photos.length || !state.summary || needed <= localFree;
   if (!photos.length) {
     $('selection-estimate').textContent = '';
   } else if (preset === 'lossless') {
@@ -1006,16 +1041,27 @@ function updateSelectionUI() {
     $('selection-estimate').textContent = '预计约 ' + formatBytes(estimated) +
       ' · 可省约 ' + formatBytes(Math.max(0, bytes - estimated)) + '（估算）';
   }
-  if (photos.length && !state.spaceOk) {
-    $('selection-estimate').textContent += ' · 本机空间不足：约需 ' +
-      formatBytes(needed) + '，可用 ' + formatBytes(localFree);
+  if (photos.length && needed > localFree && localFree > 0) {
+    $('selection-estimate').textContent += ' · 空间不足时超出部分会自动跳过';
   }
-  const capped = photos.length > MAX_JOB_ITEMS;
-  if (capped) {
-    showNotice('一次最多压缩 ' + MAX_JOB_ITEMS + ' 个，当前已选 ' + photos.length + ' 个，请分批或按日期筛选。', 'warn');
-  } else if (!state.spaceOk) {
-    showNotice('本机剩余空间不足：压缩这批约需 ' + formatBytes(needed) +
-      '，当前可用 ' + formatBytes(localFree) + '。请缩小批次或清理本机任务缓存。', 'warn');
+  const suggestion = (state.summary && state.summary.batch_suggestion) || BATCH_SUGGESTION;
+  const average = photos.length ? bytes / photos.length : 0;
+  const capacity = average > 0 && localFree > 0
+    ? Math.max(1, Math.floor((localFree * 0.8) / (average * 1.5)))
+    : suggestion;
+  if (photos.length > suggestion) {
+    showNotice(
+      '建议每批约 ' + suggestion + ' 个；当前已选 ' + photos.length +
+      ' 个，仍可继续。按当前空间约可处理 ' + capacity +
+      ' 个，超出部分会因空间不足跳过；已压缩照片默认不重复处理。',
+      'warn'
+    );
+  } else if (photos.length && needed > localFree && localFree > 0) {
+    showNotice(
+      '本机空间偏紧：本批约需 ' + formatBytes(needed) + '，可用 ' +
+      formatBytes(localFree) + '。会先处理能容纳的文件，剩余标记为空间不足。',
+      'warn'
+    );
   } else {
     refreshNotice();
   }
@@ -1030,7 +1076,7 @@ function refreshNotice() {
 function updateBusy() {
   const busy = state.busy || state.starting;
   const selected = state.selected.size;
-  $('compress-btn').disabled = busy || selected === 0 || !state.ffmpegOk || !state.spaceOk;
+  $('compress-btn').disabled = busy || selected === 0 || !state.ffmpegOk;
   $('rescan-btn').disabled = busy;
   $('refresh-btn').disabled = busy;
   $('select-scope-btn').disabled = busy;
@@ -1410,16 +1456,8 @@ async function compressSelected() {
   if (state.starting || state.busy) return;
   const photos = Array.from(state.selected.values());
   if (!photos.length) return;
-  if (photos.length > MAX_JOB_ITEMS) {
-    toast('一次最多 ' + MAX_JOB_ITEMS + ' 个，请分批处理', true);
-    return;
-  }
   if (!state.ffmpegOk) {
     toast('未安装 ffmpeg，无法压缩', true);
-    return;
-  }
-  if (!state.spaceOk) {
-    toast('本机剩余空间不足，请缩小批次或清理本地任务缓存', true);
     return;
   }
   const preset = $('preset').value;
@@ -1435,6 +1473,9 @@ async function compressSelected() {
   const ratio = EST_RATIO[preset] || 0.44;
   const speed = $('speed-select').value;
   const computeSsim = $('ssim-toggle').checked;
+  const recompress = $('recompress-toggle').checked;
+  const compressedSelected = photos.filter(function (photo) { return photo.compressed; }).length;
+  const suggestion = (state.summary && state.summary.batch_suggestion) || BATCH_SUGGESTION;
   const estimate = preset === 'lossless'
     ? '无损重封装体积几乎不变。'
     : '预计压缩后约 ' + formatBytes(bytes * ratio) + '（估算）。';
@@ -1443,9 +1484,14 @@ async function compressSelected() {
     estimate,
     '编码速度：' + (SPEED_LABELS[speed] || speed) +
       ' · SSIM：' + (computeSsim ? '计算' : '跳过'),
+    compressedSelected
+      ? '其中 ' + compressedSelected + ' 张已压缩过，只有更深档位才会再次处理。'
+      : '',
     '只处理 MP4，JPG 定格画面不会改动。',
     '压缩结果先保存在本机，预览确认后再应用到手机。',
-    photos.length > 100 ? '批量较大，可能需要较长时间，建议分批处理。' : '',
+    photos.length > suggestion
+      ? '建议每批约 ' + suggestion + ' 个；空间不足时会先处理可容纳部分，剩余标记为跳过，已应用的下次不会重复处理。'
+      : '',
   ]);
   if (!ok) return;
   state.starting = true;
@@ -1459,8 +1505,10 @@ async function compressSelected() {
         crf: crf,
         speed: speed,
         compute_ssim: computeSsim,
+        recompress: recompress,
       }),
     });
+    if (data.warning) toast(data.warning);
     state.uncheckedResults = new Set();
     showJob(data.job_id, 'compress');
   } catch (error) {
@@ -1864,6 +1912,24 @@ function bindEvents() {
     updateSelectionUI();
   });
   $('crf').addEventListener('input', updateSelectionUI);
+  $('recompress-toggle').addEventListener('change', function () {
+    if (!this.checked) {
+      let removed = 0;
+      state.selected.forEach(function (photo, key) {
+        if (photo.compressed) {
+          state.selected.delete(key);
+          removed += 1;
+        }
+      });
+      if (removed) {
+        syncVisibleCards();
+        updateSelectionBadges();
+        if (state.view && state.view.type === 'selected') showSelected();
+        toast('已取消 ' + removed + ' 张已压缩照片');
+      }
+    }
+    updateSelectionUI();
+  });
   let searchTimer = null;
   $('search').addEventListener('input', function () {
     window.clearTimeout(searchTimer);

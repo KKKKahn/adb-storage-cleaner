@@ -424,6 +424,16 @@ button { cursor: pointer; }
   box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
 }
 .card.selected .thumb { background: var(--accent-soft); }
+.compressed-badge {
+  position: absolute; top: 9px; right: 9px; z-index: 3;
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+  backdrop-filter: blur(5px);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
 
 .card-check {
   position: absolute; top: 9px; left: 9px; z-index: 3;
