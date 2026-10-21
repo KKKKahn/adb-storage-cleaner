@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和语义化版本。
 
+## [0.3.6] - 2026-10-21
+
+### Changed
+
+- “已压缩”标记改为紫色的勾（淡紫圆底 + 紫色 SVG 勾），保留右上角小尺寸和 CRF/体积提示。
+
 ## [0.3.5] - 2026-10-21
 
 ### Changed

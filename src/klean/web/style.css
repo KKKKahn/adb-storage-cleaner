@@ -495,19 +495,15 @@ button { cursor: pointer; }
   position: absolute; top: 9px; right: 9px; z-index: 3;
   width: 19px; height: 19px;
   display: grid; place-items: center;
-  background: linear-gradient(160deg, #38bdf8 0%, #6366f1 45%, #a855f7 75%, #f472b6 100%);
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  box-shadow: 0 2px 8px rgba(20, 28, 60, 0.28);
+  color: var(--violet);
+  background: color-mix(in srgb, var(--violet) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--violet) 40%, transparent);
+  box-shadow: 0 2px 8px rgba(20, 28, 60, 0.16);
   backdrop-filter: blur(5px);
   border-radius: 50%;
   pointer-events: none;
 }
-.compressed-badge .bolt {
-  width: 9px; height: 13px;
-  background: #fff;
-  clip-path: polygon(60% 0, 8% 56%, 44% 56%, 34% 100%, 92% 40%, 55% 40%);
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.22));
-}
+.compressed-badge svg { display: block; }
 
 .card-check {
   position: absolute; top: 9px; left: 9px; z-index: 3;
