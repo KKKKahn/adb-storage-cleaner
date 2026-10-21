@@ -50,10 +50,12 @@ public final class BackupActivity extends Activity {
     private View progressPanel;
     private boolean busy;
     private boolean changed;
+    private boolean liveMode = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        liveMode = getIntent().getBooleanExtra("live", true);
         thumbnails = new ThumbnailLoader(this);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundResource(R.drawable.bg_app);
@@ -127,7 +129,7 @@ public final class BackupActivity extends Activity {
         titles.setOrientation(LinearLayout.VERTICAL);
         top.addView(titles, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        titles.addView(Ui.text(this, "原片备份", 20f, Ui.TEXT, true));
+        titles.addView(Ui.text(this, liveMode ? "实况原片备份" : "视频原片备份", 20f, Ui.TEXT, true));
         summary = Ui.text(this, "正在读取备份…", 10f, Ui.MUTED, false);
         summary.setPadding(0, Ui.dp(this, 3), 0, 0);
         titles.addView(summary);
@@ -204,9 +206,18 @@ public final class BackupActivity extends Activity {
         progressText.setText("正在读取备份…");
         io.execute(() -> {
             List<Storage.BackupBatch> loaded = Storage.loadBackups(this);
+            List<Storage.BackupBatch> filtered = new ArrayList<>();
+            for (Storage.BackupBatch batch : loaded) {
+                java.util.Iterator<Storage.BackupRecord> iterator = batch.entries.iterator();
+                while (iterator.hasNext()) {
+                    Storage.BackupRecord record = iterator.next();
+                    if (record.live != liveMode) iterator.remove();
+                }
+                if (!batch.entries.isEmpty()) filtered.add(batch);
+            }
             main.post(() -> {
                 batches.clear();
-                batches.addAll(loaded);
+                batches.addAll(filtered);
                 selected.clear();
                 busy = false;
                 setBusy(false);
@@ -228,7 +239,8 @@ public final class BackupActivity extends Activity {
                 "%d 个原片 · %s · App 私有备份（卸载 App 会丢失）", count, Ui.bytes(bytes)));
         if (batches.isEmpty()) {
             TextView empty = Ui.text(this,
-                    "还没有原片备份。\n应用压缩结果前会自动备份到这里。",
+                    liveMode ? "还没有实况原片备份。\n应用压缩结果前会自动备份到这里。"
+                            : "还没有视频原片备份。\n应用压缩结果前会自动备份到这里。",
                     13f, Ui.MUTED, false);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, Ui.dp(this, 80), 0, 0);

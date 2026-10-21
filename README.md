@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
 [![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
-[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0)
+[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0)
 
 `klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
@@ -22,7 +22,7 @@
 
 > **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
 >
-> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
+> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
 
 
 ---
@@ -70,13 +70,15 @@
 
 ## Android 应用
 
-[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.0.0) · Android 10 及以上 · 无需 Root、无需电脑
+[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.2.0) · Android 10 及以上 · 无需 Root、无需电脑
 
 Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需要 ADB：
 
 - **实况照片 + 普通视频** 两条独立赛道，自动识别同名的 JPG + MP4 配对，只处理伴生 MP4。
-- 三列相册网格；长按后手指滑过多少张就选中多少张，滑到边缘会继续滚动。
-- 压缩状态筛选（全部 / 未压缩 / 已压缩）、日期范围筛选、按时间 / 大小排序。
+- 三列相册网格；顶部筛选图标打开 Mac 式浏览面板：按年份/月份浏览，点月份查看整月；月份内容按日期分组，每天一个勾选栏可「全选本日」，顶部可「全选本月」。
+- 长按后手指滑过多少张就选中多少张，滑到边缘会继续滚动。
+- 支持按相册浏览与全选；日期范围从浏览器底部选择。
+- 压缩状态筛选（全部 / 未压缩 / 已压缩）、按日期全选（某一天 / 某个月 / 日期范围，自动勾选范围内未压缩项）、按时间 / 大小排序。
 - 三档压缩质量；MediaCodec 硬件编码，实测实况短片段约 **2.7–7.1× 实时**，每张约 0.3–0.5 秒。
 - 压缩完成后先进入结果页：逐条预览压缩版、查看节省比例和速度，勾选后才应用。
 - 应用前自动把原 MP4 备份到 App 私有目录，原子替换、MD5 校验，JPG 定格画面永不修改。

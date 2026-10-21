@@ -90,9 +90,7 @@ final class MediaAdapter extends BaseAdapter {
         holder.time.setText(Ui.bytes(item.size));
         holder.meta.setText(dateText(item) + " " + timeText(item)
                 + " · " + Ui.duration(item.durationMs));
-        holder.type.setText(item.live ? "实况" : "视频");
-        holder.type.setTextColor(item.live ? 0xFFD8CCFF : 0xFFB8DFFF);
-        holder.type.setBackground(Ui.round(0x88000000, 6f, context));
+        holder.type.setVisibility(View.GONE);
         holder.check.setVisibility(View.VISIBLE);
         holder.check.setText(checked ? "✓" : "");
         holder.check.setTextColor(Color.WHITE);

@@ -25,11 +25,15 @@ import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -43,6 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -81,6 +86,14 @@ public final class MainActivity extends Activity {
     private boolean sortBySize;
     private long rangeStart;
     private long rangeEnd;
+    private String dateMode = "";
+    private String albumFilter = "";
+    private final Set<String> expandedMonths = new HashSet<>();
+    private FrameLayout drawerOverlay;
+    private LinearLayout drawerPanel;
+    private LinearLayout drawerContent;
+    private String drawerTab = "date";
+    private boolean drawerOpen;
     private int qualityIndex = 1;
     private Job currentJob;
     private final Set<String> applySelection = new LinkedHashSet<>();
@@ -94,6 +107,9 @@ public final class MainActivity extends Activity {
     private TextView liveValue;
     private TextView videoValue;
     private TextView compressedValue;
+    private TextView statLabel1;
+    private TextView statLabel2;
+    private TextView statLabel3;
     private TextView tabLive;
     private TextView tabVideo;
     private TextView selectAllButton;
@@ -113,8 +129,19 @@ public final class MainActivity extends Activity {
     private ProgressBar progressBar;
     private View progressPanel;
     private DragSelectGridView listView;
+    private RecyclerView groupedList;
+    private MonthAdapter groupedAdapter;
     private TextView scanButton;
     private TextView backupButton;
+    private ImageView galleryButton;
+    private TextView modeLabel;
+    private FrameLayout modeOverlay;
+    private TextView startLiveCount;
+    private TextView startLiveSize;
+    private TextView startVideoCount;
+    private TextView startVideoSize;
+    private TextView modeClose;
+    private boolean modeChosen;
     private TextView resultApplyButton;
 
     @Override
@@ -307,7 +334,7 @@ public final class MainActivity extends Activity {
 
         page.addView(buildHeader());
         page.addView(buildSummary());
-        page.addView(buildTabs());
+        page.addView(buildModeBar());
         page.addView(buildFilters());
         page.addView(buildHint());
 
@@ -363,10 +390,31 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         listWrap.addView(empty, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        listView.setEmptyView(empty);
         emptyView = empty;
+        groupedList = new RecyclerView(this);
+        GridLayoutManager layout = new GridLayoutManager(this, 3);
+        groupedAdapter = new MonthAdapter(this, thumbnails, selected, outcomes,
+                this::updateSelection);
+        layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                return groupedAdapter.spanSize(position);
+            }
+        });
+        groupedList.setLayoutManager(layout);
+        groupedList.setItemAnimator(null);
+        groupedList.setBackgroundColor(Color.TRANSPARENT);
+        groupedList.setPadding(Ui.dp(this, 9), Ui.dp(this, 6),
+                Ui.dp(this, 9), Ui.dp(this, 12));
+        groupedList.setClipToPadding(false);
+        groupedList.setVisibility(View.GONE);
+        groupedList.setAdapter(groupedAdapter);
+        listWrap.addView(groupedList, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         page.addView(buildProgress());
         page.addView(buildBottomBar());
+        root.addView(buildDrawerOverlay());
+        root.addView(buildModeOverlay());
         updateTabs();
         updateSelection();
         showEmptyState();
@@ -387,10 +435,28 @@ public final class MainActivity extends Activity {
         titleParams.setMarginStart(Ui.dp(this, 11));
         header.addView(titleColumn, titleParams);
         titleColumn.addView(Ui.text(this, "Klean Mobile", 18f, Ui.TEXT, true));
-        TextView sub = Ui.text(this, "本地压缩 · 原片自动备份 · 不上传",
+        TextView sub = Ui.text(this, "本机压缩 · 自动备份",
                 9.5f, Ui.MUTED, false);
         sub.setPadding(0, Ui.dp(this, 3), 0, 0);
+        sub.setSingleLine(true);
+        sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titleColumn.addView(sub);
+
+        galleryButton = new ImageView(this);
+        galleryButton.setImageResource(R.drawable.ic_filter);
+        galleryButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        galleryButton.setPadding(Ui.dp(this, 9), Ui.dp(this, 9),
+                Ui.dp(this, 9), Ui.dp(this, 9));
+        galleryButton.setBackground(Ui.bordered(0xFF1A2033, 11f, 0xFF3A4268, this));
+        galleryButton.setColorFilter(Ui.ACCENT);
+        galleryButton.setContentDescription("筛选、按月份或相册浏览");
+        galleryButton.setClickable(true);
+        galleryButton.setFocusable(true);
+        galleryButton.setOnClickListener(v -> openDrawer());
+        LinearLayout.LayoutParams galleryParams = new LinearLayout.LayoutParams(
+                Ui.dp(this, 40), Ui.dp(this, 40));
+        galleryParams.setMarginEnd(Ui.dp(this, 6));
+        header.addView(galleryButton, galleryParams);
 
         backupButton = Ui.button(this, "备份", false);
         backupButton.setTextSize(11.5f);
@@ -425,15 +491,15 @@ public final class MainActivity extends Activity {
         cardParams.setMargins(Ui.dp(this, 18), Ui.dp(this, 4),
                 Ui.dp(this, 18), 0);
         card.setLayoutParams(cardParams);
-        liveValue = addStat(card, "–", "实况照片");
+        liveValue = addStat(card, "–", "实况照片", 0);
         addDivider(card);
-        videoValue = addStat(card, "–", "普通视频");
+        videoValue = addStat(card, "–", "总大小", 1);
         addDivider(card);
-        compressedValue = addStat(card, "0", "已压缩");
+        compressedValue = addStat(card, "0", "已压缩", 2);
         return card;
     }
 
-    private TextView addStat(LinearLayout parent, String value, String label) {
+    private TextView addStat(LinearLayout parent, String value, String label, int slot) {
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -446,6 +512,9 @@ public final class MainActivity extends Activity {
         labelView.setGravity(Gravity.CENTER);
         labelView.setPadding(0, Ui.dp(this, 3), 0, 0);
         column.addView(labelView);
+        if (slot == 0) statLabel1 = labelView;
+        else if (slot == 1) statLabel2 = labelView;
+        else statLabel3 = labelView;
         return valueView;
     }
 
@@ -498,6 +567,214 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    private View buildModeBar() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowParams.setMargins(Ui.dp(this, 18), Ui.dp(this, 8),
+                Ui.dp(this, 18), 0);
+        row.setLayoutParams(rowParams);
+
+        TextView modeSwitch = Ui.button(this, "模式", false);
+        modeSwitch.setTextSize(11f);
+        modeSwitch.setPadding(Ui.dp(this, 10), Ui.dp(this, 7),
+                Ui.dp(this, 10), Ui.dp(this, 7));
+        modeSwitch.setOnClickListener(v -> showModeChooser());
+        row.addView(modeSwitch);
+
+        modeLabel = Ui.text(this, "实况照片 · 0", 12.5f, Ui.TEXT, true);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        labelParams.setMarginStart(Ui.dp(this, 9));
+        row.addView(modeLabel, labelParams);
+
+        selectAllButton = Ui.button(this, "全选", false);
+        selectAllButton.setTextSize(11f);
+        selectAllButton.setPadding(Ui.dp(this, 11), Ui.dp(this, 7),
+                Ui.dp(this, 11), Ui.dp(this, 7));
+        row.addView(selectAllButton);
+        selectAllButton.setOnClickListener(v -> toggleSelectAll());
+        return row;
+    }
+
+    private View buildModeOverlay() {
+        modeOverlay = new FrameLayout(this);
+        modeOverlay.setBackgroundResource(R.drawable.bg_app);
+        modeOverlay.setClickable(true);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(Ui.dp(this, 24), Ui.dp(this, 24),
+                Ui.dp(this, 24), Ui.dp(this, 28));
+        scroll.addView(page);
+        modeOverlay.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        page.addView(top);
+        top.addView(Ui.logo(this, 42));
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        brandParams.setMarginStart(Ui.dp(this, 11));
+        top.addView(brand, brandParams);
+        brand.addView(Ui.text(this, "Klean", 20f, Ui.TEXT, true));
+        brand.addView(Ui.text(this, "Android 本机压缩与备份", 9.5f, Ui.MUTED, false));
+        modeClose = Ui.text(this, "×", 24f, Ui.MUTED, true);
+        modeClose.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
+        modeClose.setClickable(true);
+        modeClose.setOnClickListener(v -> modeOverlay.setVisibility(View.GONE));
+        modeClose.setVisibility(modeChosen ? View.VISIBLE : View.GONE);
+        top.addView(modeClose);
+
+        TextView title = Ui.text(this, "选择要处理的类型", 25f, Ui.TEXT, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        titleParams.topMargin = Ui.dp(this, 28);
+        page.addView(title, titleParams);
+        TextView sub = Ui.text(this,
+                "实况照片和普通视频是两条完全独立的赛道，列表、选择、历史和备份互不影响。",
+                11.5f, Ui.MUTED, false);
+        sub.setLineSpacing(Ui.dp(this, 3), 1f);
+        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subParams.topMargin = Ui.dp(this, 7);
+        subParams.bottomMargin = Ui.dp(this, 10);
+        page.addView(sub, subParams);
+
+        page.addView(buildModeCard(true));
+        page.addView(buildModeCard(false));
+
+        TextView note = Ui.text(this,
+                "两条赛道的任务不会混在一起；应用前会自动备份原片，JPG 定格画面永不修改。",
+                10f, Ui.MUTED, false);
+        note.setLineSpacing(Ui.dp(this, 2), 1f);
+        LinearLayout.LayoutParams noteParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        noteParams.topMargin = Ui.dp(this, 14);
+        page.addView(note, noteParams);
+        refreshModeStats();
+        return modeOverlay;
+    }
+
+    private View buildModeCard(boolean live) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(Ui.dp(this, 18), Ui.dp(this, 16),
+                Ui.dp(this, 18), Ui.dp(this, 14));
+        card.setBackground(Ui.bordered(Ui.CARD, 16f, Ui.BORDER, this));
+        card.setClickable(true);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.topMargin = Ui.dp(this, 9);
+        card.setLayoutParams(params);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(live ? R.drawable.ic_live : R.drawable.ic_video);
+        icon.setColorFilter(live ? Ui.ACCENT : Ui.BLUE);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(Ui.dp(this, 10), Ui.dp(this, 10),
+                Ui.dp(this, 10), Ui.dp(this, 10));
+        icon.setBackground(Ui.round(live ? 0x332F7BFF : 0x228B7CFF, 11f, this));
+        card.addView(icon, new LinearLayout.LayoutParams(
+                Ui.dp(this, 46), Ui.dp(this, 46)));
+        TextView title = Ui.text(this, live ? "实况照片" : "普通视频",
+                21f, Ui.TEXT, true);
+        title.setPadding(0, Ui.dp(this, 10), 0, 0);
+        card.addView(title);
+        TextView desc = Ui.text(this, live
+                        ? "压缩伴生 MP4，保留 vivo 实况标识；JPG 定格画面永不修改。"
+                        : "独立压缩普通 MP4，独立备份，按总大小分批更稳。",
+                11f, Ui.MUTED, false);
+        desc.setLineSpacing(Ui.dp(this, 2), 1f);
+        desc.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 8));
+        card.addView(desc);
+
+        LinearLayout stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+        card.addView(stats);
+        TextView count = Ui.text(this, "—", 18f, Ui.TEXT, true);
+        stats.addView(count, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView size = Ui.text(this, "—", 18f, Ui.TEXT, true);
+        stats.addView(size, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.HORIZONTAL);
+        card.addView(labels);
+        TextView countLabel = Ui.text(this, live ? "实况照片" : "普通视频",
+                9f, Ui.MUTED, false);
+        labels.addView(countLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        labels.addView(Ui.text(this, live ? "伴生 MP4" : "总大小",
+                9f, Ui.MUTED, false), new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView enter = Ui.text(this, live ? "进入实况 →" : "进入视频 →",
+                11.5f, live ? Ui.ACCENT : Ui.BLUE, true);
+        enter.setPadding(0, Ui.dp(this, 11), 0, 0);
+        card.addView(enter);
+        if (live) {
+            startLiveCount = count;
+            startLiveSize = size;
+        } else {
+            startVideoCount = count;
+            startVideoSize = size;
+        }
+        card.setOnClickListener(v -> enterMode(live ? 0 : 1));
+        return card;
+    }
+
+    private void refreshModeStats() {
+        if (startLiveCount == null) return;
+        long liveBytes = 0;
+        for (MediaItem item : liveItems) liveBytes += item.size;
+        long videoBytes = 0;
+        for (MediaItem item : videoItems) videoBytes += item.size;
+        if (scanResult == null) {
+            startLiveCount.setText("—");
+            startLiveSize.setText("—");
+            startVideoCount.setText("—");
+            startVideoSize.setText("—");
+        } else {
+            startLiveCount.setText(String.valueOf(liveItems.size()));
+            startLiveSize.setText(Ui.bytes(liveBytes));
+            startVideoCount.setText(String.valueOf(videoItems.size()));
+            startVideoSize.setText(Ui.bytes(videoBytes));
+        }
+    }
+
+    private void showModeChooser() {
+        if (busy || modeOverlay == null) return;
+        closeDrawer();
+        refreshModeStats();
+        modeClose.setVisibility(modeChosen ? View.VISIBLE : View.GONE);
+        modeOverlay.setVisibility(View.VISIBLE);
+    }
+
+    private void enterMode(int mode) {
+        modeChosen = true;
+        tab = mode;
+        selected.clear();
+        outcomes.clear();
+        statusFilter = "all";
+        albumFilter = "";
+        dateMode = "";
+        rangeStart = 0;
+        rangeEnd = 0;
+        sortBySize = false;
+        modeOverlay.setVisibility(View.GONE);
+        applyFilters();
+        updateTabs();
+        updateSelection();
+    }
+
     private View buildFilters() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -507,17 +784,18 @@ public final class MainActivity extends Activity {
         statusAll = chip("全部");
         statusUncompressed = chip("未压缩");
         statusCompressed = chip("已压缩");
-        dateButton = chip("日期");
+        dateButton = chip("浏览");
         sortButton = chip("时间");
         addChip(row, statusAll);
         addChip(row, statusUncompressed);
         addChip(row, statusCompressed);
         addChip(row, dateButton);
         addChip(row, sortButton);
+        dateButton.setVisibility(View.GONE);
         statusAll.setOnClickListener(v -> setStatusFilter("all"));
         statusUncompressed.setOnClickListener(v -> setStatusFilter("uncompressed"));
         statusCompressed.setOnClickListener(v -> setStatusFilter("compressed"));
-        dateButton.setOnClickListener(v -> chooseDateFilter());
+        dateButton.setOnClickListener(v -> openDrawer());
         sortButton.setOnClickListener(v -> {
             if (busy || scanning) return;
             sortBySize = !sortBySize;
@@ -649,7 +927,9 @@ public final class MainActivity extends Activity {
 
     private void openBackups() {
         if (busy || scanning) return;
-        startActivityForResult(new Intent(this, BackupActivity.class), REQUEST_BACKUP);
+        Intent intent = new Intent(this, BackupActivity.class);
+        intent.putExtra("live", tab == 0);
+        startActivityForResult(intent, REQUEST_BACKUP);
     }
 
     private void selectTab(int next) {
@@ -672,7 +952,10 @@ public final class MainActivity extends Activity {
         for (MediaItem item : base) {
             if ("uncompressed".equals(statusFilter) && item.compressed) continue;
             if ("compressed".equals(statusFilter) && !item.compressed) continue;
-            if (rangeStart > 0 || rangeEnd > 0) {
+            if (!albumFilter.isEmpty()) {
+                java.io.File parent = new java.io.File(item.path).getParentFile();
+                if (parent == null || !albumFilter.equals(parent.getAbsolutePath())) continue;
+            } else if (rangeStart > 0 || rangeEnd > 0) {
                 long day = captureDay(item);
                 if (rangeStart > 0 && day < rangeStart) continue;
                 if (rangeEnd > 0 && day > rangeEnd) continue;
@@ -684,7 +967,16 @@ public final class MainActivity extends Activity {
         displayedItems.clear();
         displayedItems.addAll(rows);
         selected.clear();
-        if (adapter != null) adapter.setItems(displayedItems);
+        boolean grouped = "month".equals(dateMode);
+        if (adapter != null) {
+            if (grouped) {
+                adapter.setItems(new ArrayList<>());
+                if (groupedAdapter != null) groupedAdapter.setItems(displayedItems);
+            } else {
+                if (groupedAdapter != null) groupedAdapter.setItems(new ArrayList<>());
+                adapter.setItems(displayedItems);
+            }
+        }
         updateTabs();
         updateFilterStyles();
         updateSelection();
@@ -696,14 +988,28 @@ public final class MainActivity extends Activity {
         styleChip(statusAll, "all".equals(statusFilter));
         styleChip(statusUncompressed, "uncompressed".equals(statusFilter));
         styleChip(statusCompressed, "compressed".equals(statusFilter));
-        styleChip(dateButton, rangeStart > 0 || rangeEnd > 0);
+        boolean dateActive = !albumFilter.isEmpty() || rangeStart > 0 || rangeEnd > 0;
         styleChip(sortButton, sortBySize);
-        if (rangeStart > 0 && rangeEnd > 0) {
-            dateButton.setText(rangeLabel(rangeStart) + "~" + rangeLabel(rangeEnd));
-        } else if (rangeStart > 0) {
-            dateButton.setText(rangeLabel(rangeStart) + "~");
-        } else {
-            dateButton.setText("日期");
+        dateButton.setVisibility(dateActive ? View.VISIBLE : View.GONE);
+        if (dateActive) {
+            styleChip(dateButton, true);
+            if (!albumFilter.isEmpty()) {
+                dateButton.setText(shortAlbum(albumFilter));
+            } else if ("day".equals(dateMode)) {
+                dateButton.setText(rangeLabel(rangeStart));
+            } else if ("month".equals(dateMode)) {
+                dateButton.setText(monthLabel(rangeStart));
+            } else if (rangeStart > 0 && rangeEnd > 0) {
+                dateButton.setText(rangeLabel(rangeStart) + "~" + rangeLabel(rangeEnd));
+            } else {
+                dateButton.setText(rangeLabel(rangeStart) + "~");
+            }
+        }
+        if (galleryButton != null) {
+            galleryButton.setColorFilter(Ui.ACCENT);
+            galleryButton.setBackground(dateActive
+                    ? Ui.bordered(0xFF2A3152, 11f, Ui.ACCENT, this)
+                    : Ui.bordered(0xFF1A2033, 11f, 0xFF3A4268, this));
         }
         sortButton.setText(sortBySize ? "大小" : "时间");
         updateHint();
@@ -711,6 +1017,10 @@ public final class MainActivity extends Activity {
 
     private String rangeLabel(long day) {
         return new SimpleDateFormat("MM-dd", Locale.CHINA).format(new Date(day));
+    }
+
+    private String monthLabel(long day) {
+        return new SimpleDateFormat("yyyy-MM", Locale.CHINA).format(new Date(day));
     }
 
     private void updateHint() {
@@ -727,38 +1037,45 @@ public final class MainActivity extends Activity {
     }
 
     private void updateTabs() {
-        if (tabLive == null) return;
-        tabLive.setText(String.format(Locale.CHINA, "实况照片 %d", liveItems.size()));
-        tabVideo.setText(String.format(Locale.CHINA, "普通视频 %d", videoItems.size()));
-        tabLive.setBackground(tab == 0
-                ? Ui.bordered(0xFF242A48, 10f, Ui.ACCENT, this)
-                : Ui.bordered(Ui.CARD, 10f, Ui.BORDER, this));
-        tabLive.setTextColor(tab == 0 ? Ui.TEXT : Ui.MUTED);
-        tabVideo.setBackground(tab == 1
-                ? Ui.bordered(0xFF242A48, 10f, Ui.ACCENT, this)
-                : Ui.bordered(Ui.CARD, 10f, Ui.BORDER, this));
-        tabVideo.setTextColor(tab == 1 ? Ui.TEXT : Ui.MUTED);
-        if (liveValue != null) liveValue.setText(String.valueOf(liveItems.size()));
-        if (videoValue != null) videoValue.setText(String.valueOf(videoItems.size()));
-        if (compressedValue != null) {
-            int count = 0;
-            for (MediaItem item : liveItems) if (item.compressed) count++;
-            for (MediaItem item : videoItems) if (item.compressed) count++;
-            compressedValue.setText(String.valueOf(count));
+        List<MediaItem> current = tab == 0 ? liveItems : videoItems;
+        long bytes = 0;
+        int compressed = 0;
+        for (MediaItem item : current) {
+            bytes += item.size;
+            if (item.compressed) compressed++;
         }
+        if (modeLabel != null) {
+            modeLabel.setText(String.format(Locale.CHINA, "%s · %d",
+                    tab == 0 ? "实况照片" : "普通视频", current.size()));
+        }
+        if (statLabel1 != null) statLabel1.setText(tab == 0 ? "实况照片" : "普通视频");
+        if (liveValue != null) liveValue.setText(String.valueOf(current.size()));
+        if (statLabel2 != null) statLabel2.setText("总大小");
+        if (videoValue != null) videoValue.setText(Ui.bytes(bytes));
+        if (statLabel3 != null) statLabel3.setText("已压缩");
+        if (compressedValue != null) compressedValue.setText(String.valueOf(compressed));
     }
 
     private void showEmptyState() {
         if (emptyView == null) return;
-        int total = tab == 0 ? liveItems.size() : videoItems.size();
-        if (total == 0) {
-            emptyView.setText(scanResult == null
-                    ? "正在扫描媒体库…"
-                    : "没有找到媒体文件。请确认权限或相册内容。");
-        } else if (displayedItems.isEmpty()) {
-            emptyView.setText("当前筛选没有文件。");
+        boolean empty = displayedItems.isEmpty();
+        boolean grouped = "month".equals(dateMode);
+        if (empty) {
+            int total = tab == 0 ? liveItems.size() : videoItems.size();
+            emptyView.setText(total == 0
+                    ? (scanResult == null ? "正在扫描媒体库…"
+                    : "没有找到媒体文件。请确认权限或相册内容。")
+                    : "当前筛选没有文件。");
+            emptyView.setVisibility(View.VISIBLE);
+            listView.setVisibility(View.GONE);
+            if (groupedList != null) groupedList.setVisibility(View.GONE);
         } else {
-            emptyView.setText("没有可显示的文件。");
+            emptyView.setVisibility(View.GONE);
+            listView.setVisibility(grouped ? View.GONE : View.VISIBLE);
+            if (groupedList != null) {
+                groupedList.setVisibility(grouped ? View.VISIBLE : View.GONE);
+                if (grouped) groupedAdapter.refresh();
+            }
         }
     }
 
@@ -792,6 +1109,7 @@ public final class MainActivity extends Activity {
         }
         adapter.refresh();
         updateSelection();
+        refreshGroupedSelection();
     }
 
     private void clearSelection() {
@@ -800,6 +1118,7 @@ public final class MainActivity extends Activity {
         selected.clear();
         adapter.refresh();
         updateSelection();
+        refreshGroupedSelection();
         toast("已清空 " + count + " 个选择");
     }
 
@@ -839,7 +1158,12 @@ public final class MainActivity extends Activity {
                 break;
             }
         }
-        selectAllButton.setText(allSelected ? "取消全选" : "全选");
+        String selectBase = "全选";
+        if (!albumFilter.isEmpty()) selectBase = "全选相册";
+        else if ("day".equals(dateMode)) selectBase = "全选本日";
+        else if ("month".equals(dateMode)) selectBase = "全选本月";
+        else if ("range".equals(dateMode)) selectBase = "全选范围";
+        selectAllButton.setText(allSelected ? "取消全选" : selectBase);
         selectAllButton.setAlpha(busy || scanning || selectable.isEmpty() ? 0.4f : 1f);
         selectAllButton.setClickable(!busy && !scanning && !selectable.isEmpty());
         if (compressButton != null) {
@@ -870,44 +1194,423 @@ public final class MainActivity extends Activity {
     }
 
     private long captureDay(MediaItem item) {
-        Matcher matcher = NAME_DATE.matcher(item.name);
-        if (matcher.find()) {
-            Calendar calendar = Calendar.getInstance();
-            calendar.set(Integer.parseInt(matcher.group(1)),
-                    Integer.parseInt(matcher.group(2)) - 1,
-                    Integer.parseInt(matcher.group(3)), 0, 0, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            return calendar.getTimeInMillis();
+        return item.captureDay();
+    }
+
+    private void openDrawer() {
+        if (busy || scanning || drawerOverlay == null) return;
+        if (modeOverlay != null && modeOverlay.getVisibility() == View.VISIBLE) return;
+        drawerOpen = true;
+        drawerOverlay.setVisibility(View.VISIBLE);
+        drawerPanel.animate().translationX(0).setDuration(180).start();
+        drawerOverlay.setAlpha(0f);
+        drawerOverlay.animate().alpha(1f).setDuration(160).start();
+        renderDrawer();
+    }
+
+    private void closeDrawer() {
+        if (drawerOverlay == null || !drawerOpen) return;
+        drawerOpen = false;
+        drawerPanel.animate().translationX(-drawerPanel.getWidth())
+                .setDuration(160)
+                .withEndAction(() -> drawerOverlay.setVisibility(View.GONE))
+                .start();
+        drawerOverlay.animate().alpha(0f).setDuration(140).start();
+    }
+
+    private View buildDrawerOverlay() {
+        drawerOverlay = new FrameLayout(this);
+        drawerOverlay.setVisibility(View.GONE);
+        drawerOverlay.setAlpha(0f);
+
+        View scrim = new View(this);
+        scrim.setBackgroundColor(0xB3000000);
+        scrim.setOnClickListener(v -> closeDrawer());
+        drawerOverlay.addView(scrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        int width = Math.round(getResources().getDisplayMetrics().widthPixels * 0.86f);
+        drawerPanel = new LinearLayout(this);
+        drawerPanel.setOrientation(LinearLayout.VERTICAL);
+        drawerPanel.setBackgroundColor(Ui.CARD);
+        drawerPanel.setClickable(true);
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                width, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START);
+        drawerOverlay.addView(drawerPanel, panelParams);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(Ui.dp(this, 18), Ui.dp(this, 16),
+                Ui.dp(this, 14), Ui.dp(this, 8));
+        drawerPanel.addView(header);
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        header.addView(titles, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        titles.addView(Ui.text(this, "照片与相册", 20f, Ui.TEXT, true));
+        TextView drawerSub = Ui.text(this,
+                "按年/月浏览；进入月份后按日期分组，可直接全选某天", 9.5f, Ui.MUTED, false);
+        drawerSub.setPadding(0, Ui.dp(this, 3), 0, 0);
+        titles.addView(drawerSub);
+        TextView close = Ui.text(this, "×", 24f, Ui.MUTED, true);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 4), 0);
+        close.setClickable(true);
+        close.setOnClickListener(v -> closeDrawer());
+        header.addView(close);
+
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setPadding(Ui.dp(this, 18), Ui.dp(this, 2),
+                Ui.dp(this, 18), Ui.dp(this, 8));
+        drawerPanel.addView(tabs);
+        TextView dateTab = chip("按日期");
+        dateTab.setOnClickListener(v -> {
+            drawerTab = "date";
+            renderDrawer();
+        });
+        TextView albumTab = chip("按相册");
+        albumTab.setOnClickListener(v -> {
+            drawerTab = "album";
+            renderDrawer();
+        });
+        addChip(tabs, dateTab);
+        addChip(tabs, albumTab);
+        drawerPanel.setTag(new TextView[]{dateTab, albumTab});
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        drawerContent = new LinearLayout(this);
+        drawerContent.setOrientation(LinearLayout.VERTICAL);
+        drawerContent.setPadding(Ui.dp(this, 12), 0,
+                Ui.dp(this, 12), Ui.dp(this, 12));
+        scroll.addView(drawerContent);
+        drawerPanel.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(Ui.dp(this, 16), Ui.dp(this, 9),
+                Ui.dp(this, 16), Ui.dp(this, 9));
+        footer.setBackground(Ui.bordered(Ui.CARD, 0f, Ui.BORDER, this));
+        drawerPanel.addView(footer);
+        TextView range = Ui.button(this, "日期范围…", false);
+        range.setTextSize(10.5f);
+        range.setPadding(Ui.dp(this, 10), Ui.dp(this, 7),
+                Ui.dp(this, 10), Ui.dp(this, 7));
+        range.setOnClickListener(v -> {
+            closeDrawer();
+            pickDateRange();
+        });
+        footer.addView(range);
+        TextView clear = Ui.text(this, "清除筛选", 10.5f, Ui.DANGER, false);
+        clear.setPadding(Ui.dp(this, 12), Ui.dp(this, 6),
+                Ui.dp(this, 4), Ui.dp(this, 6));
+        clear.setClickable(true);
+        clear.setOnClickListener(v -> {
+            albumFilter = "";
+            dateMode = "";
+            rangeStart = 0;
+            rangeEnd = 0;
+            selected.clear();
+            applyFilters();
+            closeDrawer();
+        });
+        footer.addView(clear, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return drawerOverlay;
+    }
+
+    private void renderDrawer() {
+        if (drawerContent == null) return;
+        TextView[] tabs = (TextView[]) drawerPanel.getTag();
+        if (tabs != null) {
+            styleChip(tabs[0], "date".equals(drawerTab));
+            styleChip(tabs[1], "album".equals(drawerTab));
         }
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTimeInMillis(item.dateMs);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
-        return calendar.getTimeInMillis();
+        drawerContent.removeAllViews();
+        List<MediaItem> base = tab == 0 ? liveItems : videoItems;
+        if ("album".equals(drawerTab)) {
+            renderDrawerAlbums(base);
+        } else {
+            renderDrawerDates(base);
+        }
+    }
+
+    private void renderDrawerDates(List<MediaItem> base) {
+        Map<String, Map<String, List<MediaItem>>> years = new TreeMap<>(
+                java.util.Collections.reverseOrder());
+        for (MediaItem item : base) {
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTimeInMillis(item.captureDay());
+            String key = new SimpleDateFormat("yyyy-MM", Locale.CHINA)
+                    .format(calendar.getTime());
+            String year = key.substring(0, 4);
+            years.computeIfAbsent(year, value -> new TreeMap<>(
+                            java.util.Collections.reverseOrder()))
+                    .computeIfAbsent(key, value -> new ArrayList<>())
+                    .add(item);
+        }
+        if (years.isEmpty()) {
+            drawerContent.addView(drawerEmpty("没有媒体文件"));
+            return;
+        }
+        for (Map.Entry<String, Map<String, List<MediaItem>>> yearEntry : years.entrySet()) {
+            int yearCount = 0;
+            long yearBytes = 0;
+            for (List<MediaItem> monthItems : yearEntry.getValue().values()) {
+                yearCount += monthItems.size();
+                for (MediaItem item : monthItems) yearBytes += item.size;
+            }
+            LinearLayout yearHead = new LinearLayout(this);
+            yearHead.setOrientation(LinearLayout.HORIZONTAL);
+            yearHead.setGravity(Gravity.CENTER_VERTICAL);
+            yearHead.setPadding(Ui.dp(this, 8), Ui.dp(this, 12),
+                    Ui.dp(this, 6), Ui.dp(this, 5));
+            yearHead.addView(Ui.text(this, yearEntry.getKey() + " 年",
+                    14f, Ui.TEXT, true), new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            yearHead.addView(Ui.text(this, yearCount + " 个 · " + Ui.bytes(yearBytes),
+                    8.5f, Ui.MUTED, false));
+            drawerContent.addView(yearHead);
+
+            for (Map.Entry<String, List<MediaItem>> monthEntry
+                    : yearEntry.getValue().entrySet()) {
+                String key = monthEntry.getKey();
+                List<MediaItem> items = monthEntry.getValue();
+                Calendar start = Calendar.getInstance();
+                start.set(Integer.parseInt(key.substring(0, 4)),
+                        Integer.parseInt(key.substring(5)) - 1, 1, 0, 0, 0);
+                start.set(Calendar.MILLISECOND, 0);
+                Calendar end = (Calendar) start.clone();
+                end.add(Calendar.MONTH, 1);
+                end.add(Calendar.MILLISECOND, -1);
+                final long monthStart = start.getTimeInMillis();
+                final long monthEnd = end.getTimeInMillis();
+
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Ui.dp(this, 10), Ui.dp(this, 8),
+                        Ui.dp(this, 6), Ui.dp(this, 8));
+                row.setBackground(Ui.round(Ui.CARD_2, 9f, this));
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rowParams.bottomMargin = Ui.dp(this, 3);
+                row.setLayoutParams(rowParams);
+
+                LinearLayout info = new LinearLayout(this);
+                info.setOrientation(LinearLayout.VERTICAL);
+                info.setClickable(true);
+                info.setOnClickListener(v -> applyDateView(
+                        monthStart, monthEnd, "month", key, false, key));
+                row.addView(info, new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                info.addView(Ui.text(this, key.substring(5) + " 月",
+                        12.5f, Ui.TEXT, true));
+                long bytes = 0;
+                int selectedCount = 0;
+                for (MediaItem item : items) {
+                    bytes += item.size;
+                    if (selected.contains(item.path)) selectedCount++;
+                }
+                info.addView(Ui.text(this, String.format(Locale.CHINA,
+                        "%d 个 · %s%s", items.size(), Ui.bytes(bytes),
+                        selectedCount > 0 ? " · 已选 " + selectedCount : ""),
+                        9f, Ui.MUTED, false));
+                TextView select = Ui.text(this, "全选本月", 9.5f, Ui.ACCENT, true);
+                select.setPadding(Ui.dp(this, 6), Ui.dp(this, 5),
+                        Ui.dp(this, 6), Ui.dp(this, 5));
+                select.setClickable(true);
+                select.setOnClickListener(v -> applyDateView(
+                        monthStart, monthEnd, "month", key, true, key + " 月"));
+                row.addView(select);
+                drawerContent.addView(row);
+            }
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 6)));
+            drawerContent.addView(spacer);
+        }
+    }
+
+    private void renderDrawerAlbums(List<MediaItem> base) {
+        Map<String, List<MediaItem>> albums = new TreeMap<>();
+        for (MediaItem item : base) {
+            java.io.File parent = new java.io.File(item.path).getParentFile();
+            String key = parent == null ? "/" : parent.getAbsolutePath();
+            albums.computeIfAbsent(key, value -> new ArrayList<>()).add(item);
+        }
+        if (albums.isEmpty()) {
+            drawerContent.addView(drawerEmpty("没有相册"));
+            return;
+        }
+        for (Map.Entry<String, List<MediaItem>> entry : albums.entrySet()) {
+            String album = entry.getKey();
+            List<MediaItem> items = entry.getValue();
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Ui.dp(this, 8), Ui.dp(this, 9),
+                    Ui.dp(this, 4), Ui.dp(this, 9));
+            row.setBackground(Ui.round(Ui.CARD_2, 9f, this));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowParams.bottomMargin = Ui.dp(this, 3);
+            row.setLayoutParams(rowParams);
+            LinearLayout info = new LinearLayout(this);
+            info.setOrientation(LinearLayout.VERTICAL);
+            info.setClickable(true);
+            info.setOnClickListener(v -> applyAlbumView(album, false));
+            row.addView(info, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            info.addView(Ui.text(this, shortAlbum(album), 12f, Ui.TEXT, true));
+            long bytes = 0;
+            int selectedCount = 0;
+            for (MediaItem item : items) {
+                bytes += item.size;
+                if (selected.contains(item.path)) selectedCount++;
+            }
+            info.addView(Ui.text(this, String.format(Locale.CHINA,
+                    "%d 个 · %s%s", items.size(), Ui.bytes(bytes),
+                    selectedCount > 0 ? " · 已选 " + selectedCount : ""),
+                    8.5f, Ui.MUTED, false));
+            TextView select = Ui.text(this, "全选", 9.5f, Ui.ACCENT, true);
+            select.setPadding(Ui.dp(this, 6), Ui.dp(this, 5),
+                    Ui.dp(this, 6), Ui.dp(this, 5));
+            select.setClickable(true);
+            select.setOnClickListener(v -> applyAlbumView(album, true));
+            row.addView(select);
+            drawerContent.addView(row);
+        }
+    }
+
+    private TextView drawerEmpty(String text) {
+        TextView empty = Ui.text(this, text, 12f, Ui.MUTED, false);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(0, Ui.dp(this, 60), 0, 0);
+        return empty;
+    }
+
+    private String shortAlbum(String album) {
+        int index = album.lastIndexOf('/');
+        String name = index >= 0 ? album.substring(index + 1) : album;
+        return name.isEmpty() ? album : name;
+    }
+
+    private void applyDateView(long start, long end, String mode,
+                               String label, boolean select, String scope) {
+        albumFilter = "";
+        rangeStart = start;
+        rangeEnd = end;
+        dateMode = mode;
+        if ("compressed".equals(statusFilter)) statusFilter = "all";
+        applyFilters();
+        if (select) selectDateItems(scope);
+        refreshGroupedSelection();
+        closeDrawer();
+    }
+
+    private void applyAlbumView(String album, boolean select) {
+        albumFilter = album;
+        rangeStart = 0;
+        rangeEnd = 0;
+        dateMode = "";
+        if ("compressed".equals(statusFilter)) statusFilter = "all";
+        applyFilters();
+        if (select) selectDateItems("「" + shortAlbum(album) + "」相册");
+        closeDrawer();
     }
 
     private void chooseDateFilter() {
         if (busy || scanning) return;
-        if (rangeStart > 0 || rangeEnd > 0) {
-            new AlertDialog.Builder(this)
-                    .setTitle("日期筛选")
-                    .setItems(new String[]{"重新选择日期", "清除日期筛选"},
-                            (dialog, which) -> {
-                                if (which == 0) pickDateRange();
-                                else {
-                                    rangeStart = 0;
-                                    rangeEnd = 0;
-                                    selected.clear();
-                                    applyFilters();
-                                }
-                            })
-                    .setNegativeButton("取消", null)
-                    .show();
-        } else {
-            pickDateRange();
+        boolean active = rangeStart > 0 || rangeEnd > 0;
+        String[] options = active
+                ? new String[]{"全选某一天", "全选某个月", "选择日期范围", "清除日期筛选"}
+                : new String[]{"全选某一天", "全选某个月", "选择日期范围"};
+        new AlertDialog.Builder(this)
+                .setTitle("按日期全选")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) pickDayFilter();
+                    else if (which == 1) pickMonthFilter();
+                    else if (which == 2) pickDateRange();
+                    else {
+                        rangeStart = 0;
+                        rangeEnd = 0;
+                        dateMode = "";
+                        selected.clear();
+                        applyFilters();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void pickDayFilter() {
+        Calendar calendar = Calendar.getInstance();
+        if (rangeStart > 0) calendar.setTimeInMillis(rangeStart);
+        DatePickerDialog picker = new DatePickerDialog(this,
+                (view, year, month, dayOfMonth) -> {
+                    long start = dayMillis(year, month, dayOfMonth);
+                    rangeStart = start;
+                    rangeEnd = start + 24L * 60 * 60 * 1000 - 1;
+                    dateMode = "day";
+                    if ("compressed".equals(statusFilter)) statusFilter = "all";
+                    applyFilters();
+                    selectDateItems(rangeLabel(start));
+                },
+                calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH),
+                calendar.get(Calendar.DAY_OF_MONTH));
+        picker.setTitle("选择要全选的那一天");
+        picker.getDatePicker().setMaxDate(System.currentTimeMillis());
+        picker.show();
+    }
+
+    private void pickMonthFilter() {
+        List<MediaItem> base = tab == 0 ? liveItems : videoItems;
+        Map<String, Integer> counts = new TreeMap<>(java.util.Collections.reverseOrder());
+        for (MediaItem item : base) {
+            Calendar calendar = Calendar.getInstance();
+            calendar.setTimeInMillis(captureDay(item));
+            String key = new SimpleDateFormat("yyyy-MM", Locale.CHINA)
+                    .format(calendar.getTime());
+            counts.put(key, counts.getOrDefault(key, 0) + 1);
         }
+        if (counts.isEmpty()) {
+            toast("当前分类没有可选择的月份");
+            return;
+        }
+        final String[] labels = new String[counts.size()];
+        final String[] keys = new String[counts.size()];
+        int index = 0;
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            keys[index] = entry.getKey();
+            labels[index] = entry.getKey() + " · " + entry.getValue() + " 个";
+            index++;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择月份（自动全选未压缩）")
+                .setItems(labels, (dialog, which) -> {
+                    String key = keys[which];
+                    String[] parts = key.split("-");
+                    Calendar start = Calendar.getInstance();
+                    start.set(Integer.parseInt(parts[0]),
+                            Integer.parseInt(parts[1]) - 1, 1, 0, 0, 0);
+                    start.set(Calendar.MILLISECOND, 0);
+                    Calendar end = (Calendar) start.clone();
+                    end.add(Calendar.MONTH, 1);
+                    end.add(Calendar.MILLISECOND, -1);
+                    rangeStart = start.getTimeInMillis();
+                    rangeEnd = end.getTimeInMillis();
+                    dateMode = "month";
+                    if ("compressed".equals(statusFilter)) statusFilter = "all";
+                    applyFilters();
+                    selectDateItems(key + " 月");
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void pickDateRange() {
@@ -922,10 +1625,13 @@ public final class MainActivity extends Activity {
                     DatePickerDialog endPicker = new DatePickerDialog(this,
                             (endView, endYear, endMonth, endDay) -> {
                                 long end = dayMillis(endYear, endMonth, endDay);
+                                albumFilter = "";
                                 rangeStart = Math.min(start, end);
                                 rangeEnd = Math.max(start, end);
-                                selected.clear();
+                                dateMode = "range";
+                                if ("compressed".equals(statusFilter)) statusFilter = "all";
                                 applyFilters();
+                                selectDateItems("日期范围");
                             },
                             endCal.get(Calendar.YEAR), endCal.get(Calendar.MONTH),
                             endCal.get(Calendar.DAY_OF_MONTH));
@@ -936,6 +1642,37 @@ public final class MainActivity extends Activity {
                 calendar.get(Calendar.DAY_OF_MONTH));
         startPicker.setTitle("选择开始日期");
         startPicker.show();
+    }
+
+    private void selectDateItems(String scope) {
+        int selectedCount = 0;
+        int skipped = 0;
+        for (MediaItem item : displayedItems) {
+            if (item.compressed) {
+                skipped++;
+            } else {
+                selected.add(item.path);
+                selectedCount++;
+            }
+        }
+        adapter.refresh();
+        updateSelection();
+        refreshGroupedSelection();
+        if (selectedCount > 0) {
+            hint.setText(String.format(Locale.CHINA,
+                    "已选中%s %d 个未压缩文件%s；预览确认后再应用。",
+                    scope, selectedCount,
+                    skipped > 0 ? "，跳过 " + skipped + " 个已压缩" : ""));
+            toast(String.format(Locale.CHINA,
+                    "已全选%s的 %d 个未压缩文件%s",
+                    scope, selectedCount,
+                    skipped > 0 ? "，跳过 " + skipped + " 个已压缩" : ""));
+        } else {
+            hint.setText(skipped > 0
+                    ? scope + "范围内都是已压缩文件。"
+                    : scope + "范围内没有可压缩文件。");
+            toast(hint.getText().toString());
+        }
     }
 
     private long dayMillis(int year, int month, int day) {
@@ -1461,6 +2198,12 @@ public final class MainActivity extends Activity {
         selected.clear();
         outcomes.clear();
         updateSelection();
+        if (emptyView != null) {
+            emptyView.setText("正在扫描媒体库…");
+            emptyView.setVisibility(View.VISIBLE);
+            listView.setVisibility(View.GONE);
+            if (groupedList != null) groupedList.setVisibility(View.GONE);
+        }
         showProgress(true, true, "正在扫描媒体库…");
         io.execute(() -> {
             try {
@@ -1493,6 +2236,7 @@ public final class MainActivity extends Activity {
         for (MediaItem item : liveItems) markCompressed(item);
         for (MediaItem item : videoItems) markCompressed(item);
         scanning = false;
+        refreshModeStats();
         showProgress(false, false, "");
         applyFilters();
         showEmptyState();
@@ -1502,6 +2246,10 @@ public final class MainActivity extends Activity {
     private void markCompressed(MediaItem item) {
         Storage.HistoryEntry entry = history.get(item.path);
         item.compressed = entry != null && entry.compressedSize == item.size;
+    }
+
+    private void refreshGroupedSelection() {
+        if (groupedAdapter != null && "month".equals(dateMode)) groupedAdapter.refresh();
     }
 
     private void showProgress(boolean visible, boolean indeterminate, String text) {
