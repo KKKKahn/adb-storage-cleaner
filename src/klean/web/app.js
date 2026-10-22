@@ -74,6 +74,19 @@ function formatDuration(ms) {
   return (ms / 1000).toFixed(1) + ' 秒';
 }
 
+function updateSessionSavings(data) {
+  const value = $('session-saved-value');
+  if (!value) return;
+  value.textContent = formatBytes(data.session_saved_bytes || 0);
+  const wrap = $('session-saved');
+  if (wrap) {
+    const files = data.session_saved_files || 0;
+    wrap.title = files > 0
+      ? '本次打开应用后，已应用 ' + files + ' 个压缩，累计节省空间'
+      : '本次打开应用后，已应用压缩累计节省空间';
+  }
+}
+
 function basename(path) {
   return String(path || '').split('/').pop();
 }
@@ -232,6 +245,7 @@ async function loadSummary() {
   $('total-pairs').textContent = (summary.totals.pairs || 0).toLocaleString('zh-CN');
   $('total-size').textContent = formatBytes(summary.totals.bytes);
   $('backup-size').textContent = formatBytes(summary.backup_bytes);
+  updateSessionSavings(summary);
   state.ffmpegOk = Boolean(summary.ffmpeg && summary.ffmpeg.ok);
   const speedSelect = $('speed-select');
   const hardwareOption = speedSelect.querySelector('option[value="hardware"]');

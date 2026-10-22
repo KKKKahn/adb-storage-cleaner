@@ -49,6 +49,19 @@ function formatBytes(value) {
   return (index === 0 ? result.toFixed(0) : result.toFixed(2)) + ' ' + units[index];
 }
 
+function updateSessionSavings(data) {
+  const value = $('session-saved-value');
+  if (!value) return;
+  value.textContent = formatBytes(data.session_saved_bytes || 0);
+  const wrap = $('session-saved');
+  if (wrap) {
+    const files = data.session_saved_files || 0;
+    wrap.title = files > 0
+      ? '本次打开应用后，已应用 ' + files + ' 个压缩，累计节省空间'
+      : '本次打开应用后，已应用压缩累计节省空间';
+  }
+}
+
 function formatDuration(ms) {
   if (!ms) return '时长未知';
   const total = Math.round(ms / 1000);
@@ -211,6 +224,7 @@ async function loadSummary() {
   $('video-size').textContent = formatBytes(data.bytes);
   $('video-compressed').textContent = (data.compressed_count || 0).toLocaleString('zh-CN');
   $('backup-size').textContent = formatBytes(data.backup_bytes || 0);
+  updateSessionSavings(data);
   $('all-count').textContent = (data.count || 0) + ' 个';
   $('video-side-summary').textContent = formatBytes(data.bytes);
   updateSelectionUI();

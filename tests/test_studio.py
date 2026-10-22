@@ -103,6 +103,19 @@ def test_pairs_for_filters():
     assert state.pairs_for_album("/sdcard/Nope") == []
 
 
+def test_session_savings_are_separate_and_survive_reapply():
+    state = make_state()
+    state.note_applied("/sdcard/DCIM/Camera/a.mp4", True, 10_000_000, 3_000_000)
+    state.note_applied("/sdcard/DCIM/Camera/a.mp4", True, 10_000_000, 3_000_000)
+    state.note_applied("/sdcard/DCIM/Camera/b.mp4", True, 1_000_000, 1_200_000)
+    state.note_applied("/sdcard/DCIM/Camera/v.mp4", False, 20_000_000, 5_000_000)
+    assert state.session_saved(True) == {"saved_bytes": 7_000_000, "files": 1}
+    assert state.session_saved(False) == {"saved_bytes": 15_000_000, "files": 1}
+    state.note_restored("/sdcard/DCIM/Camera/a.mp4", True)
+    assert state.session_saved(True) == {"saved_bytes": 0, "files": 0}
+    assert state.session_saved(False) == {"saved_bytes": 15_000_000, "files": 1}
+
+
 def test_photo_payload_contains_album():
     payload = _photo_payload(make_pairs()[0])
     assert payload["album"] == "/sdcard/DCIM/Camera"

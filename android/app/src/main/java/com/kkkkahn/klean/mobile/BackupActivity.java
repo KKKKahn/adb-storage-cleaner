@@ -519,6 +519,7 @@ public final class BackupActivity extends Activity {
                 });
                 try {
                     Storage.restore(this, record);
+                    SessionSavings.restored(record.path);
                     restored++;
                 } catch (Exception error) {
                     skipped++;

@@ -13,7 +13,7 @@
 </script>
 <meta name="klean-token" content="__KLEAN_TOKEN__">
 <title>Klean Studio · 实况照片压缩</title>
-<link rel="stylesheet" href="/static/style.css?v=0.5.2">
+<link rel="stylesheet" href="/static/style.css?v=0.6.0">
 </head>
 <body>
 <header class="topbar">
@@ -87,7 +87,12 @@
     <div class="content-top">
       <div class="content-head">
         <div>
-          <h2 id="view-title">最近的照片</h2>
+          <div class="head-title-line">
+            <h2 id="view-title">最近的照片</h2>
+            <span id="session-saved" class="session-saved" title="本次打开应用后，已应用到手机的压缩累计节省空间">
+              本次已节省 <strong id="session-saved-value">0 B</strong>
+            </span>
+          </div>
           <p id="view-sub" class="sub">正在加载…</p>
         </div>
         <div class="view-actions">
@@ -218,7 +223,7 @@
 
 <div id="toast" class="toast hidden" role="status"></div>
 
-<script src="/static/app.js?v=0.5.2"></script>
-<script src="/static/backups.js?v=0.5.2"></script>
+<script src="/static/app.js?v=0.6.0"></script>
+<script src="/static/backups.js?v=0.6.0"></script>
 </body>
 </html>

@@ -136,12 +136,15 @@ public final class MainActivity extends Activity {
     private TextView modeLabel;
     private TextView modeTitle;
     private TextView modeSubtitle;
+    private TextView sessionSavedView;
     private ImageView backButton;
     private FrameLayout modeOverlay;
     private TextView startLiveCount;
     private TextView startLiveSize;
+    private TextView startLiveSaved;
     private TextView startVideoCount;
     private TextView startVideoSize;
+    private TextView startVideoSaved;
     private TextView modeClose;
     private boolean modeChosen;
     private TextView resultApplyButton;
@@ -196,6 +199,7 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_BACKUP && resultCode == RESULT_OK) {
             pendingRescan = false;
+            updateTabs();
             if (mainBuilt && !busy && !scanning) startScan();
         }
     }
@@ -454,6 +458,10 @@ public final class MainActivity extends Activity {
         modeSubtitle.setSingleLine(true);
         modeSubtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titles.addView(modeSubtitle);
+        sessionSavedView = Ui.text(this, "本次已节省 0 B", 11f, Ui.OK, true);
+        sessionSavedView.setPadding(0, Ui.dp(this, 4), 0, 0);
+        sessionSavedView.setSingleLine(true);
+        titles.addView(sessionSavedView);
 
         galleryButton = new ImageView(this);
         galleryButton.setImageResource(R.drawable.ic_filter);
@@ -725,6 +733,9 @@ public final class MainActivity extends Activity {
         desc.setLineSpacing(Ui.dp(this, 2), 1f);
         desc.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 8));
         card.addView(desc);
+        TextView saved = Ui.text(this, "本次已节省 0 B", 12f, Ui.OK, true);
+        saved.setPadding(0, 0, 0, Ui.dp(this, 7));
+        card.addView(saved);
 
         LinearLayout stats = new LinearLayout(this);
         stats.setOrientation(LinearLayout.HORIZONTAL);
@@ -757,9 +768,11 @@ public final class MainActivity extends Activity {
         if (live) {
             startLiveCount = count;
             startLiveSize = size;
+            startLiveSaved = saved;
         } else {
             startVideoCount = count;
             startVideoSize = size;
+            startVideoSaved = saved;
         }
         card.setOnClickListener(v -> enterMode(live ? 0 : 1));
         return card;
@@ -781,6 +794,14 @@ public final class MainActivity extends Activity {
             startLiveSize.setText(Ui.bytes(liveBytes));
             startVideoCount.setText(String.valueOf(videoItems.size()));
             startVideoSize.setText(Ui.bytes(videoBytes));
+        }
+        if (startLiveSaved != null) {
+            startLiveSaved.setText(String.format(Locale.CHINA,
+                    "本次已节省 %s", Ui.bytes(SessionSavings.bytes(true))));
+        }
+        if (startVideoSaved != null) {
+            startVideoSaved.setText(String.format(Locale.CHINA,
+                    "本次已节省 %s", Ui.bytes(SessionSavings.bytes(false))));
         }
     }
 
@@ -1102,6 +1123,10 @@ public final class MainActivity extends Activity {
         if (modeSubtitle != null) {
             modeSubtitle.setText(String.format(Locale.CHINA,
                     "%d 个 · %s · 已压缩 %d", current.size(), Ui.bytes(bytes), compressed));
+        }
+        if (sessionSavedView != null) {
+            sessionSavedView.setText(String.format(Locale.CHINA,
+                    "本次已节省 %s", Ui.bytes(SessionSavings.bytes(tab == 0))));
         }
         if (liveValue != null) liveValue.setText(String.valueOf(liveItems.size()));
         if (videoValue != null) videoValue.setText(String.valueOf(videoItems.size()));
@@ -2207,6 +2232,8 @@ public final class MainActivity extends Activity {
                     entry.mtime = record.mtime;
                     Storage.putHistory(MainActivity.this, record.path, entry);
                     history.put(record.path, entry);
+                    SessionSavings.applied(record.path, record.live,
+                            record.originalSize - record.compressedSize);
                     item.item.compressed = true;
                     item.item.size = record.compressedSize;
                     item.status = "applied";
@@ -2250,10 +2277,13 @@ public final class MainActivity extends Activity {
         applyFilters();
         String message = String.format(Locale.CHINA,
                 "成功应用 %d 个，失败 %d 个。\n\n"
+                        + "本次累计已节省：%s\n\n"
                         + "原片备份：%d 个（%s）\n"
                         + "只替换了 MP4，JPG 没有改动。\n"
-                        + "可在顶部「备份」里预览、恢复或删除备份。",
-                applied, failed, backupCount, batchDir.getAbsolutePath());
+                        + "可在右上角「⋮」菜单的「原片备份」里预览、恢复或删除备份。",
+                applied, failed,
+                Ui.bytes(SessionSavings.bytes(tab == 0)),
+                backupCount, batchDir.getAbsolutePath());
         new AlertDialog.Builder(this)
                 .setTitle(applied > 0 ? "已应用到手机" : "应用失败")
                 .setMessage(message)

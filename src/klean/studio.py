@@ -163,10 +163,12 @@ class StudioState:
     android: str = ""
     jobs: Dict[str, Job] = field(default_factory=dict)
     history: Dict[str, Dict] = field(default_factory=dict)
+    session_live_saved: Dict[str, int] = field(default_factory=dict)
     videos: List[VideoItem] = field(default_factory=list)
     video_by_path: Dict[str, VideoItem] = field(default_factory=dict)
     video_by_id: Dict[str, VideoItem] = field(default_factory=dict)
     video_history: Dict[str, Dict] = field(default_factory=dict)
+    session_video_saved: Dict[str, int] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock)
     adb_lock: threading.Lock = field(default_factory=threading.Lock)
     thumb_sem: threading.BoundedSemaphore = field(
@@ -292,6 +294,26 @@ class StudioState:
             if entry.path == path:
                 entry.size = size
                 break
+
+    def note_applied(
+        self, path: str, live: bool, original_size: int, compressed_size: int
+    ) -> None:
+        saved = original_size - compressed_size
+        if saved <= 0:
+            return
+        with self.lock:
+            bucket = self.session_live_saved if live else self.session_video_saved
+            bucket[path] = saved
+
+    def note_restored(self, path: str, live: bool) -> None:
+        with self.lock:
+            bucket = self.session_live_saved if live else self.session_video_saved
+            bucket.pop(path, None)
+
+    def session_saved(self, live: bool) -> Dict[str, int]:
+        with self.lock:
+            bucket = self.session_live_saved if live else self.session_video_saved
+            return {"saved_bytes": sum(bucket.values()), "files": len(bucket)}
 
     def find_item(self, job_id: str, mp4: str) -> Optional[ItemResult]:
         job = self.jobs.get(job_id)
@@ -1372,6 +1394,9 @@ def _apply_one(
             restore_rows.append(
                 (target.relative_to(backup_dir).as_posix(), pair.mp4, mtime)
             )
+            state.note_applied(
+                pair.mp4, True, src.original_size, src.compressed_size
+            )
             if src.crf_used is not None:
                 state.history[item.mp4] = {
                     "original_md5": src.original_md5,
@@ -1701,6 +1726,9 @@ def _video_apply_one(
             restore_rows.append(
                 (target.relative_to(backup_dir).as_posix(), video.path, mtime)
             )
+            state.note_applied(
+                video.path, False, src.original_size, src.compressed_size
+            )
             state.video_history[video.path] = {
                 "original_md5": src.original_md5,
                 "compressed_md5": src.compressed_md5,
@@ -1803,6 +1831,7 @@ def _video_restore_job(state: StudioState, job: Job, source_job: Job) -> None:
                 item.progress = 1.0
                 item.phase = ""
                 src.status = "restored"
+                state.note_restored(video.path, False)
                 state.video_history.pop(video.path, None)
         except (CompressError, ADBError, OSError, ValueError) as exc:
             with state.lock:
@@ -1848,6 +1877,7 @@ def _restore_job(state: StudioState, job: Job, source_job: Job) -> None:
                 item.mtime = mtime
                 item.status = "restored"
                 src.status = "restored"
+                state.note_restored(pair.mp4, True)
                 state.history.pop(pair.mp4, None)
         except (CompressError, ADBError, OSError, ValueError) as exc:
             with state.lock:
@@ -1928,6 +1958,7 @@ def _restore_backup_job(state: StudioState, job: Job, session_name: str) -> None
                 item.backup = entry["backup"]
                 item.status = "restored"
                 state.history.pop(item.mp4, None)
+                state.note_restored(item.mp4, True)
                 if pair is not None:
                     state.update_scan_size(item.mp4, entry["original_size"])
                     pair.size = entry["original_size"]
@@ -2011,6 +2042,7 @@ def _restore_video_backup_job(state: StudioState, job: Job, session_name: str) -
                 item.status = "restored"
                 state.update_scan_size(video.path, entry["original_size"])
                 video.size = entry["original_size"]
+                state.note_restored(video.path, False)
                 state.video_history.pop(video.path, None)
         except (CompressError, ADBError, OSError, ValueError) as exc:
             with state.lock:
@@ -2511,10 +2543,13 @@ class StudioHandler(BaseHTTPRequestHandler):
                     1 for video in videos if _video_history_entry(self.state, video)
                 )
                 live_backup_bytes, video_backup_bytes = _backup_sizes()
+                session_video = self.state.session_saved(False)
                 payload = {
                     "count": len(videos),
                     "bytes": sum(video.size for video in videos),
                     "compressed_count": compressed,
+                    "session_saved_bytes": session_video["saved_bytes"],
+                    "session_saved_files": session_video["files"],
                     "backup_bytes": live_backup_bytes + video_backup_bytes,
                     "video_backup_bytes": video_backup_bytes,
                     "free_bytes": shutil.disk_usage(str(state_dir())).free,
@@ -2757,6 +2792,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         with self.state.lock:
             active = self.state.active_job()
             active_id = active.id if active else None
+            session_live = self.state.session_saved(True)
         return {
             "device": {
                 "model": self.state.model,
@@ -2786,6 +2822,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             "workers": self.state.workers,
             "apply_workers": self.state.apply_workers,
             "history_count": len(self.state.history),
+            "session_saved_bytes": session_live["saved_bytes"],
+            "session_saved_files": session_live["files"],
             "batch_suggestion": BATCH_SUGGESTION,
             "crf_range": [UI_CRF_MIN, UI_CRF_MAX],
             "backup_bytes": backup_bytes,

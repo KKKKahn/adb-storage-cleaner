@@ -7,8 +7,8 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208%2B-brightgreen)]()
-[![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
-[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0)
+[![macOS App](https://img.shields.io/badge/download-macOS%20App-4f6bff)](https://github.com/KKKKahn/klean/releases/tag/v0.6.0)
+[![Android APK](https://img.shields.io/badge/download-Android%20APK-3ddc84)](https://github.com/KKKKahn/klean/releases/tag/android-v1.4.0)
 
 `klean` 通过 USB 调试（ADB）读取手机存储，生成可读的报告，并且只清理**明确列入白名单**的缓存/缩略图/临时目录。默认全部是只读的；只有显式传入 `--apply` 或 `--delete` 才会删除，而且每次删除都会在电脑上留下 TSV 清单。
 
@@ -20,9 +20,9 @@
 
 > iPhone 不支持。iOS 没有 ADB 这类通用调试通道，清理方式完全不同。
 
-> **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
+> **macOS 用户**：[下载 Klean 应用](https://github.com/KKKKahn/klean/releases/tag/v0.6.0) · Apple Silicon（M1–M6）· macOS 12+ · 内置 adb/ffmpeg，无需额外安装
 >
-> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
+> **Android 用户**：[下载 Klean APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.4.0) · Android 10+ · 手机本地压缩、备份、替换和恢复，不需要电脑
 
 
 ---
@@ -50,12 +50,13 @@
 
 ## macOS 应用
 
-[下载 macOS 应用](https://github.com/KKKKahn/klean/releases/tag/v0.5.2)
+[下载 macOS 应用](https://github.com/KKKKahn/klean/releases/tag/v0.6.0)
 
 - 面向 Apple Silicon（M1–M6），macOS 12 Monterey 及以上。
 - 内置 adb、ffmpeg、ffprobe 与 Python 运行时，不需要自己安装依赖。
 - 打开 App → 按提示连接手机并开启 USB 调试 → 识别后自动进入工作台（原生窗口 + WKWebView）。
 - 使用中拔线会提示断开，重新连接并解锁后自动恢复。
+- 模式选择、实况页和视频页分别显示「本次已节省」；只累计实际应用到手机的压缩，恢复原片会扣回，重开 App 归零。
 - App 为 ad-hoc 签名、未公证：第一次打开请右键 App →「打开」；或在「系统设置 → 隐私与安全性」里选择「仍要打开」。
 - 所有处理都在本机完成，不上传文件。
 
@@ -70,7 +71,7 @@
 
 ## Android 应用
 
-[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.3.0) · Android 10 及以上 · 无需 Root、无需电脑
+[下载 Klean Android APK](https://github.com/KKKKahn/klean/releases/tag/android-v1.4.0) · Android 10 及以上 · 无需 Root、无需电脑
 
 Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需要 ADB。打开先选择「实况照片」或「普通视频」，两条赛道的列表、选择、历史与备份完全独立：
 
@@ -79,6 +80,7 @@ Klean Android 把电脑端的核心流程完整搬到了手机上，而且不需
 - 长按后手指滑过多少张就选中多少张，滑到边缘会继续滚动。
 - 支持按相册浏览与全选；日期范围从浏览面板底部选择。
 - 压缩状态筛选（全部 / 未压缩 / 已压缩）、按日期全选（某一天 / 某个月 / 日期范围，自动勾选范围内未压缩项）、按时间 / 大小排序。
+- 顶部显示当前赛道的「本次已节省」，模式选择页分别显示实况 / 视频的会话节省；只累计已应用的压缩，恢复原片会扣回。
 - 所有按钮按 40–48dp 触控尺寸设计；底部固定显示已选数量与「预览 / 开始压缩」大按钮。
 - 三档压缩质量；MediaCodec 硬件编码，实测实况短片段约 **2.7–7.1× 实时**，每张约 0.3–0.5 秒。
 - 压缩完成后先进入结果页：逐条预览压缩版、查看节省比例和速度，勾选后才应用。
@@ -680,6 +682,7 @@ docs/           # 安全模型、设计、兼容性
 - `apps`: per-package external storage usage.
 - macOS app: native launchpad with bundled adb, ffmpeg and ffprobe; live-photo workbench in a WKWebView.
 - Android APK: pick live photos or videos on launch, browse by year/month, select a whole day or month, compress with MediaCodec, preview results, back up originals atomically and restore them later.
+- Session savings: the macOS app and the Android app both show how much space has been saved since launch, tracked separately for live photos and videos; applying adds to the total, restoring an original subtracts from it.
 
 Requirements: Python 3.9+ for the CLI; macOS 12+ on Apple Silicon for the desktop app; Android 10+ for the offline APK. iPhone is not supported.
 

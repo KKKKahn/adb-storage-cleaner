@@ -13,7 +13,7 @@
 </script>
 <meta name="klean-token" content="__KLEAN_TOKEN__">
 <title>Klean · 选择模式</title>
-<link rel="stylesheet" href="/static/style.css?v=0.5.2">
+<link rel="stylesheet" href="/static/style.css?v=0.6.0">
 <style>
   body.start-page { display: block; overflow-y: auto; }
   .start-top {
@@ -44,8 +44,9 @@
   .mode-card.video .mode-icon { color: var(--accent); }
   .mode-card h2 { margin: 0; font-size: 21px; letter-spacing: -.2px; }
   .mode-card .mode-desc { margin: 8px 0 18px; color: var(--text-2); font-size: 13px; line-height: 1.65; min-height: 42px; }
-  .mode-stats { display: flex; gap: 18px; margin-bottom: 20px; }
+  .mode-stats { display: flex; gap: 18px; margin-bottom: 20px; flex-wrap: wrap; }
   .mode-stat strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .mode-stat strong.saved { color: var(--ok); }
   .mode-stat span { color: var(--text-3); font-size: 11px; }
   .mode-enter {
     display: inline-flex; align-items: center; gap: 6px;
@@ -92,6 +93,7 @@
       <div class="mode-stats">
         <div class="mode-stat"><strong id="live-count">—</strong><span>实况照片</span></div>
         <div class="mode-stat"><strong id="live-size">—</strong><span>伴生 MP4</span></div>
+        <div class="mode-stat"><strong id="live-saved" class="saved">0 B</strong><span>本次已节省</span></div>
       </div>
       <span class="mode-enter">进入实况 →</span>
     </a>
@@ -107,6 +109,7 @@
       <div class="mode-stats">
         <div class="mode-stat"><strong id="video-count">—</strong><span>普通视频</span></div>
         <div class="mode-stat"><strong id="video-size">—</strong><span>总大小</span></div>
+        <div class="mode-stat"><strong id="video-saved" class="saved">0 B</strong><span>本次已节省</span></div>
       </div>
       <span class="mode-enter">进入视频 →</span>
     </a>
@@ -172,10 +175,12 @@
   api('/api/summary').then(function (data) {
     document.getElementById('live-count').textContent = (data.totals.pairs || 0).toLocaleString('zh-CN');
     document.getElementById('live-size').textContent = formatBytes(data.totals.bytes);
+    document.getElementById('live-saved').textContent = formatBytes(data.session_saved_bytes || 0);
   }).catch(function () {});
   api('/api/video/summary').then(function (data) {
     document.getElementById('video-count').textContent = (data.count || 0).toLocaleString('zh-CN');
     document.getElementById('video-size').textContent = formatBytes(data.bytes);
+    document.getElementById('video-saved').textContent = formatBytes(data.session_saved_bytes || 0);
   }).catch(function () {});
 </script>
 </body>

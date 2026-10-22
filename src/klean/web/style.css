@@ -427,6 +427,15 @@ button { cursor: pointer; }
   gap: 16px; margin-bottom: 12px;
 }
 .content-head h2 { margin: 0; font-size: 19px; letter-spacing: -0.2px; }
+.head-title-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.session-saved {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--ok-soft); color: var(--ok);
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.session-saved strong { font-size: 12.5px; font-weight: 700; }
 .view-actions { display: flex; gap: 8px; }
 
 .filter-bar {
